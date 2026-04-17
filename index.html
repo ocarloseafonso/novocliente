@@ -63,6 +63,24 @@
     margin-left: auto;
   }
 
+  /* ── TTS Toggle ── */
+  .tts-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    transition: all .2s;
+  }
+  .tts-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .tts-toggle.active { border-color: var(--green); color: var(--green); background: rgba(52,211,153,.1); }
+
   /* ── Progress ── */
   .progress-wrap {
     width: 100%;
@@ -452,12 +470,13 @@
 
 <header>
   <div class="logo">GMN<span>.</span>agente</div>
+  <div class="tts-toggle active" id="ttsToggle" onclick="toggleTTS()">🔊 Voz</div>
   <div class="badge">Google Meu Negócio</div>
 </header>
 
 <div class="progress-wrap">
   <div class="progress-label">
-    <span id="progressLabel">Iniciando...</span>
+    <span id="progressLabel">Aguardando código...</span>
     <span id="progressPct">0%</span>
   </div>
   <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -469,9 +488,9 @@
 
 <div class="input-area">
   <div class="input-box">
-    <textarea id="userInput" rows="1" placeholder="Digite sua resposta..." disabled></textarea>
+    <textarea id="userInput" rows="1" placeholder="Digite seu código de acesso..."></textarea>
     <button class="btn-icon" id="voiceBtn" title="Falar">🎤</button>
-    <button class="btn-icon" id="sendBtn" disabled>➤</button>
+    <button class="btn-icon" id="sendBtn">➤</button>
   </div>
   <div class="voice-hint" id="voiceHint">Pressione 🎤 para responder por voz</div>
 </div>
@@ -499,61 +518,66 @@
 // ═══════════════════════════════════════════════════
 const GEMINI_API_KEY = "AIzaSyAYKrASX8vaUn6Ag03lJxe3Ygq-sSrtE5w";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-const CONSULTANT_EMAIL_DEFAULT = ""; // preencha com seu e-mail
+
+// ⚠️ COLE AQUI a URL do Apps Script após publicação como Web App
+const APPS_SCRIPT_URL = "COLE_AQUI_A_URL_DO_APPS_SCRIPT";
+
+const CONSULTANT_EMAIL_DEFAULT = "";
 
 // ═══════════════════════════════════════════════════
 // ESTADO
 // ═══════════════════════════════════════════════════
 let conversationHistory = [];
-let answers = {};
-let currentStep = 0;
+let currentClient = null;       // { nome, codigo, status }
+let clientFields = [];          // perguntas + respostas do cliente
+let formQuestions = [];          // perguntas do formulário base
+let currentQuestionIndex = 0;    // qual pergunta estamos
+let isAuthenticated = false;
 let isWaiting = false;
 let recognition = null;
 let isListening = false;
-
-const TOTAL_QUESTIONS = 28; // aprox.
+let ttsEnabled = true;
 
 // ═══════════════════════════════════════════════════
-// ROTEIRO DE PERGUNTAS (com contexto para o AI)
+// SYSTEM PROMPT (dinâmico)
 // ═══════════════════════════════════════════════════
-const SYSTEM_PROMPT = `Você é um assistente simpático e profissional chamado "Bê" que ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
+function buildSystemPrompt(clientData, questions, fieldsState) {
+  const answeredStr = fieldsState
+    .filter(f => f.answer)
+    .map(f => `- ${f.question}: ${f.answer}`)
+    .join('\n');
 
-Seu trabalho é fazer perguntas de forma CONVERSACIONAL — uma de cada vez — e registrar as respostas. Nunca faça mais de uma pergunta por mensagem.
+  const pendingStr = fieldsState
+    .filter(f => !f.answer)
+    .map(f => `- ${f.question}`)
+    .join('\n');
 
-Quando o usuário não souber responder, ajude com exemplos práticos e sugestões simples. Nunca deixe ele sem saída.
+  return `Você é "Bê", um assistente simpático e extremamente humano que ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
 
-Siga esta SEQUÊNCIA DE TÓPICOS na ordem:
-1. Nome da empresa
-2. Segmento/tipo de negócio
-3. Cidade e estado
-4. Endereço completo
-5. Telefone(s) de contato
-6. E-mail da empresa
-7. Site (se tiver)
-8. Instagram e/ou Facebook (se tiver)
-9. Data de abertura do negócio (mês e ano pelo menos)
-10. Horários de atendimento (dias e horários)
-11. Funcionamento em feriados
-12. Área de cobertura / bairros atendidos
-13. Produtos e/ou serviços oferecidos (peça detalhes)
-14. Formas de pagamento aceitas
-15. Tem estacionamento? (qual tipo)
-16. Wi-fi disponível para clientes?
-17. Acessibilidade (rampa, banheiro adaptado, etc.)
-18. Local apropriado para crianças?
-19. Banheiro disponível para clientes?
-20. A empresa realiza agendamento ou atende sem marcar?
-21. Horários especiais de serviço (entrega, retirada, drive-thru, etc.)
-22. Bebidas são servidas no local?
-23. Informações adicionais que o dono queira acrescentar
+REGRAS ESSENCIAIS:
+1. Fale de forma NATURAL e CONVERSACIONAL — como uma pessoa de verdade, nunca um robô. Use expressões coloquiais, reaja genuinamente às respostas.
+2. NUNCA faça mais de UMA pergunta por mensagem. Converse uma de cada vez.
+3. Quando o cliente não souber, ajude com exemplos práticos. Não o pressione.
+4. NUNCA revele informações de OUTROS clientes. Você só tem acesso ao cadastro pertencente ao código ${clientData.codigo} (${clientData.nome}).
+5. De acordo com a LGPD, não forneça informações de terceiros e não compartilhe dados que não pertencem ao cadastro ativo.
+6. Seja breve nas respostas para poupar dados de voz — fale o necessário sem enrolar.
 
-Para cada resposta, confirme brevemente o que entendeu e passe para o próximo tópico.
+CLIENTE ATUAL:
+- Nome: ${clientData.nome}
+- Código: ${clientData.codigo}
 
-Quando TODOS os tópicos forem cobertos, diga: "COLETA_COMPLETA" seguido de um JSON com as respostas assim:
-COLETA_COMPLETA
-{"nome_empresa":"...","segmento":"...","cidade_estado":"...","endereco":"...","telefone":"...","email":"...","site":"...","redes_sociais":"...","data_abertura":"...","horario_atendimento":"...","feriados":"...","area_cobertura":"...","produtos_servicos":"...","formas_pagamento":"...","estacionamento":"...","wifi":"...","acessibilidade":"...","criancas":"...","banheiro":"...","agendamento":"...","horarios_especiais":"...","bebidas":"...","info_adicionais":"..."}
+${answeredStr ? `JÁ RESPONDIDAS (não pergunte novamente):\n${answeredStr}\n` : ''}
+${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendingStr}\n` : ''}
 
-Seja amigável, use emojis com moderação, fale em português do Brasil. Nunca liste todas as perguntas de uma vez.`;
+Para cada resposta que o cliente der, confirme brevemente (1 frase) e passe para a próxima pergunta pendente.
+
+IMPORTANTE: Quando extrair a resposta do cliente para salvar, marque na sua resposta exatamente assim:
+[SALVAR|pergunta exata|resposta]
+Exemplo: [SALVAR|Nome da empresa|Padaria do João]
+Esse marcador será processado automaticamente pelo sistema — NÃO mostre ao usuário.
+
+Quando TODAS as perguntas forem respondidas, diga "COLETA_COMPLETA" no final da sua mensagem.`;
+}
 
 // ═══════════════════════════════════════════════════
 // DOM helpers
@@ -570,7 +594,7 @@ function scrollBottom() {
   setTimeout(() => chatBox.scrollIntoView({ behavior: 'smooth', block: 'end' }), 100);
 }
 
-function appendMessage(role, text, tips = null, chips = null) {
+function appendMessage(role, text) {
   const wrap = document.createElement('div');
   wrap.className = `msg ${role}`;
 
@@ -580,32 +604,9 @@ function appendMessage(role, text, tips = null, chips = null) {
 
   const bubble = document.createElement('div');
   bubble.className = `bubble ${role}`;
-  bubble.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
-
-  if (tips) {
-    const tipEl = document.createElement('div');
-    tipEl.className = 'tip';
-    tipEl.innerHTML = '💡 ' + tips;
-    bubble.appendChild(tipEl);
-  }
-
-  if (chips && chips.length > 0) {
-    const chipsWrap = document.createElement('div');
-    chipsWrap.className = 'chips';
-    chips.forEach(label => {
-      const chip = document.createElement('button');
-      chip.className = 'chip';
-      chip.textContent = label;
-      chip.onclick = () => {
-        document.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
-        chip.classList.add('selected');
-        userInput.value = label;
-        handleSend();
-      };
-      chipsWrap.appendChild(chip);
-    });
-    bubble.appendChild(chipsWrap);
-  }
+  // Clean [SALVAR|...|...] markers before showing
+  const cleanText = text.replace(/\[SALVAR\|[^\]]*\]/g, '').trim();
+  bubble.innerHTML = cleanText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
 
   wrap.appendChild(avatar);
   wrap.appendChild(bubble);
@@ -641,10 +642,90 @@ function setProgress(pct, label) {
 }
 
 // ═══════════════════════════════════════════════════
-// API call
+// APPS SCRIPT CALLS
+// ═══════════════════════════════════════════════════
+async function callAppsScript(params) {
+  try {
+    const url = APPS_SCRIPT_URL;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(params)
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Apps Script error:', err);
+    return { error: err.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// FLUXO DE AUTENTICAÇÃO (Código de Acesso)
+// ═══════════════════════════════════════════════════
+async function handleCodeInput(code) {
+  appendMessage('user', code);
+  showTyping();
+
+  const result = await callAppsScript({ action: 'checkCode', codigo: code.trim() });
+  removeTyping();
+
+  if (result.error) {
+    appendMessage('bot', '⚠️ Tive um problema ao acessar o banco de dados. Tente novamente em alguns segundos.');
+    speakText('Tive um problema ao acessar o banco de dados. Tente novamente.');
+    return;
+  }
+
+  if (!result.found) {
+    appendMessage('bot', '❌ Código não encontrado. Verifique se digitou corretamente e tente novamente.');
+    speakText('Código não encontrado. Verifique e tente novamente.');
+    return;
+  }
+
+  currentClient = {
+    nome: result.nome,
+    codigo: result.codigo,
+    status: result.status
+  };
+
+  isAuthenticated = true;
+  userInput.placeholder = 'Digite sua resposta...';
+
+  // Criar aba do cliente se necessário
+  await callAppsScript({ action: 'createClientTab', codigo: currentClient.codigo });
+
+  // Buscar dados do cliente (perguntas + respostas existentes)
+  const clientData = await callAppsScript({ action: 'getClientData', codigo: currentClient.codigo });
+
+  if (clientData.fields) {
+    clientFields = clientData.fields;
+  }
+
+  // Calcular progresso
+  const answered = clientFields.filter(f => f.answer).length;
+  const total = clientFields.length;
+  const pct = total > 0 ? (answered / total) * 100 : 0;
+
+  if (pct >= 100) {
+    setProgress(100, 'Cadastro completo!');
+    appendMessage('bot', `Olá, ${currentClient.nome}! 🎉 Seu cadastro já está completo! Se precisar alterar alguma informação, é só me avisar.`);
+    speakText(`Olá, ${currentClient.nome}! Seu cadastro já está completo! Se precisar alterar alguma informação, é só me avisar.`);
+    return;
+  }
+
+  setProgress(pct, answered > 0 ? 'Continuando cadastro...' : 'Iniciando cadastro...');
+
+  // Enviar contexto para o Gemini iniciar a conversa
+  const greeting = answered > 0
+    ? `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Já respondi algumas perguntas antes. Podemos continuar de onde paramos?`
+    : `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Quero começar o cadastro do meu negócio no Google Meu Negócio.`;
+
+  await callGemini(greeting);
+}
+
+// ═══════════════════════════════════════════════════
+// GEMINI API
 // ═══════════════════════════════════════════════════
 async function callGemini(userMsg) {
-  // Gemini data structure uses 'user' e 'model' (não assistant) e array elements
   conversationHistory.push({ role: 'user', parts: [{ text: userMsg }] });
 
   showTyping();
@@ -653,67 +734,66 @@ async function callGemini(userMsg) {
   userInput.disabled = true;
 
   try {
+    const systemPrompt = buildSystemPrompt(currentClient, formQuestions, clientFields);
+
     const payload = {
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: conversationHistory,
       generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1000
+        temperature: 0.85,
+        maxOutputTokens: 800
       }
     };
 
     const res = await fetch(GEMINI_API_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    if (!res.ok) {
-      throw new Error(`API Error: ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`API Error: ${res.status}`);
 
     const data = await res.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Não consegui processar. Pode repetir?';
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Desculpe, não entendi. Pode repetir?';
 
     conversationHistory.push({ role: 'model', parts: [{ text: reply }] });
     removeTyping();
 
-    // Check if collection is complete
+    // Processar marcadores de salvamento [SALVAR|pergunta|resposta]
+    const saveMatches = reply.matchAll(/\[SALVAR\|([^|]+)\|([^\]]+)\]/g);
+    for (const match of saveMatches) {
+      const questionText = match[1].trim();
+      const answerText = match[2].trim();
+      await processSaveMarker(questionText, answerText);
+    }
+
+    // Verificar se a coleta está completa
     if (reply.includes('COLETA_COMPLETA')) {
-      try {
-        const jsonMatch = reply.match(/\{[\s\S]+\}/);
-        if (jsonMatch) {
-          answers = JSON.parse(jsonMatch[0]);
-        }
-      } catch(e) { console.error('JSON parse err', e); }
-
-      const cleanReply = reply.replace(/COLETA_COMPLETA[\s\S]*/, '').trim() ||
-        '✅ Perfeito! Coletei todas as informações. Vou mostrar um resumo para você revisar antes de enviar ao consultor.';
-
+      const cleanReply = reply.replace(/COLETA_COMPLETA/g, '').replace(/\[SALVAR\|[^\]]*\]/g, '').trim() ||
+        '✅ Perfeito! Todas as informações foram coletadas. Vou abrir um resumo para revisão.';
       appendMessage('bot', cleanReply);
-      speakText(cleanReply);
+      speakText(cleanReply.replace(/\[SALVAR\|[^\]]*\]/g, ''));
       setProgress(100, 'Concluído!');
-
       setTimeout(() => openModal(), 1500);
       return;
     }
 
-    // Estimate progress
-    currentStep = Math.min(currentStep + 1, TOTAL_QUESTIONS - 1);
-    const pct = (currentStep / TOTAL_QUESTIONS) * 95;
-    const topics = ['Identificação','Contato','Localização','Serviços','Comodidades','Pagamentos','Finalizando...'];
+    // Atualizar progresso
+    const answered = clientFields.filter(f => f.answer).length;
+    const total = clientFields.length;
+    const pct = total > 0 ? (answered / total) * 95 : 0;
+    const topics = ['Identificação','Contato','Localização','Serviços','Comodidades','Finalizando...'];
     const topicIdx = Math.floor(pct / 100 * topics.length);
     setProgress(pct, topics[Math.min(topicIdx, topics.length - 1)]);
 
-    // Display reply
     appendMessage('bot', reply);
-    speakText(reply);
+    // Falar (limpar marcadores)
+    const spokenText = reply.replace(/\[SALVAR\|[^\]]*\]/g, '').trim();
+    speakText(spokenText);
 
-  } catch(err) {
+  } catch (err) {
     removeTyping();
-    appendMessage('bot', '⚠️ Erro de conexão com a IA. Verifique sua conexão.');
+    appendMessage('bot', '⚠️ Erro na conexão com a IA. Verifique sua internet e tente novamente.');
     console.error(err);
   }
 
@@ -724,15 +804,60 @@ async function callGemini(userMsg) {
 }
 
 // ═══════════════════════════════════════════════════
+// PROCESSAR MARCADORES [SALVAR]
+// ═══════════════════════════════════════════════════
+async function processSaveMarker(questionText, answerText) {
+  // Encontrar a pergunta que mais se parece no clientFields
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const field of clientFields) {
+    const score = similarity(field.question.toLowerCase(), questionText.toLowerCase());
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = field;
+    }
+  }
+
+  if (bestMatch && bestScore > 0.3) {
+    bestMatch.answer = answerText;
+    // Salvar na planilha
+    await callAppsScript({
+      action: 'saveAnswer',
+      codigo: currentClient.codigo,
+      rowIndex: bestMatch.rowIndex,
+      resposta: answerText
+    });
+  }
+}
+
+// Similaridade simples entre strings
+function similarity(s1, s2) {
+  const words1 = s1.split(/\s+/);
+  const words2 = s2.split(/\s+/);
+  let matches = 0;
+  for (const w of words1) {
+    if (words2.some(w2 => w2.includes(w) || w.includes(w2))) matches++;
+  }
+  return matches / Math.max(words1.length, words2.length);
+}
+
+// ═══════════════════════════════════════════════════
 // Send handler
 // ═══════════════════════════════════════════════════
 function handleSend() {
   const text = userInput.value.trim();
   if (!text || isWaiting) return;
-  appendMessage('user', text);
+
   userInput.value = '';
   userInput.style.height = 'auto';
-  callGemini(text);
+
+  if (!isAuthenticated) {
+    handleCodeInput(text);
+  } else {
+    appendMessage('user', text);
+    callGemini(text);
+  }
 }
 
 sendBtn.addEventListener('click', handleSend);
@@ -789,15 +914,15 @@ function setupVoice() {
 
 voiceBtn.addEventListener('click', () => {
   if (!recognition) return;
+  // Parar TTS se estiver falando
+  if (window.speechSynthesis) speechSynthesis.cancel();
   if (isListening) { recognition.stop(); return; }
   recognition.start();
 });
 
 // ═══════════════════════════════════════════════════
-// Text-to-Speech (TTS) for bot messages
+// Text-to-Speech (TTS) humanizado
 // ═══════════════════════════════════════════════════
-let ttsEnabled = true; // Auto-ativado para proporcionar experiência humanizada
-
 let availableVoices = [];
 function loadVoices() {
   availableVoices = window.speechSynthesis.getVoices();
@@ -806,29 +931,40 @@ if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = loadVoices;
 }
 
+function toggleTTS() {
+  ttsEnabled = !ttsEnabled;
+  const el = document.getElementById('ttsToggle');
+  if (ttsEnabled) {
+    el.classList.add('active');
+    el.innerHTML = '🔊 Voz';
+  } else {
+    el.classList.remove('active');
+    el.innerHTML = '🔇 Mudo';
+    if (window.speechSynthesis) speechSynthesis.cancel();
+  }
+}
+
 function speakText(text) {
   if (!ttsEnabled || !window.speechSynthesis) return;
-  
-  // Limpar formatação markdown e trechos limitados
-  const clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '').substring(0, 500);
+
+  // Limpar formatação
+  const clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '').replace(/\[SALVAR\|[^\]]*\]/g, '').substring(0, 500);
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.lang = 'pt-BR';
-  utterance.rate = 1.05; // Mais dinâmico
+  utterance.rate = 1.05;
   utterance.pitch = 1.0;
 
   if (availableVoices.length === 0) {
     availableVoices = window.speechSynthesis.getVoices();
   }
 
-  // Tentar achar voz mais "premium/humanizada" nativa em PT
+  // Procurar melhor voz PT-BR
   const ptVoices = availableVoices.filter(v => v.lang.startsWith('pt'));
   let bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('online'));
   if (!bestVoice) bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('google'));
   if (!bestVoice && ptVoices.length > 0) bestVoice = ptVoices[0];
 
-  if (bestVoice) {
-    utterance.voice = bestVoice;
-  }
+  if (bestVoice) utterance.voice = bestVoice;
 
   speechSynthesis.cancel();
   speechSynthesis.speak(utterance);
@@ -837,43 +973,16 @@ function speakText(text) {
 // ═══════════════════════════════════════════════════
 // Modal (Review)
 // ═══════════════════════════════════════════════════
-const FIELD_LABELS = {
-  nome_empresa: 'Nome da Empresa',
-  segmento: 'Segmento / Tipo de Negócio',
-  cidade_estado: 'Cidade e Estado',
-  endereco: 'Endereço Completo',
-  telefone: 'Telefone(s)',
-  email: 'E-mail da Empresa',
-  site: 'Site',
-  redes_sociais: 'Redes Sociais',
-  data_abertura: 'Data de Abertura',
-  horario_atendimento: 'Horários de Atendimento',
-  feriados: 'Funcionamento em Feriados',
-  area_cobertura: 'Área de Cobertura',
-  produtos_servicos: 'Produtos e/ou Serviços',
-  formas_pagamento: 'Formas de Pagamento',
-  estacionamento: 'Estacionamento',
-  wifi: 'Wi-Fi',
-  acessibilidade: 'Acessibilidade',
-  criancas: 'Adequado para Crianças',
-  banheiro: 'Banheiro para Clientes',
-  agendamento: 'Agendamento / Atendimento',
-  horarios_especiais: 'Horários Especiais',
-  bebidas: 'Bebidas no Local',
-  info_adicionais: 'Informações Adicionais'
-};
-
 function openModal() {
   const qaList = document.getElementById('qaList');
   qaList.innerHTML = '';
 
-  Object.entries(FIELD_LABELS).forEach(([key, label]) => {
-    const val = answers[key] || '';
+  clientFields.forEach(field => {
     const item = document.createElement('div');
     item.className = 'qa-item';
     item.innerHTML = `
-      <div class="qa-q">${label}</div>
-      <div class="qa-a ${val ? '' : 'empty'}">${val || 'Não informado'}</div>
+      <div class="qa-q">${field.question}</div>
+      <div class="qa-a ${field.answer ? '' : 'empty'}">${field.answer || 'Não informado'}</div>
     `;
     qaList.appendChild(item);
   });
@@ -884,7 +993,8 @@ function openModal() {
 
 function closeModal() {
   document.getElementById('overlay').classList.remove('open');
-  appendMessage('bot', 'Tudo bem! Pode me dizer o que precisa corrigir ou adicionar. 😊');
+  appendMessage('bot', 'Tudo bem! Me diga o que precisa corrigir ou acrescentar. 😊');
+  speakText('Tudo bem! Me diga o que precisa corrigir ou acrescentar.');
   sendBtn.disabled = false;
   userInput.disabled = false;
   userInput.focus();
@@ -892,33 +1002,27 @@ function closeModal() {
 
 async function sendEmail() {
   const email = document.getElementById('consultorEmail').value.trim();
-  if (!email) {
-    alert('Por favor, informe o e-mail do consultor.');
-    return;
-  }
+  if (!email) { alert('Por favor, informe o e-mail do consultor.'); return; }
 
-  // Build the report text
   let report = '📋 RELATÓRIO GMN – NOVO CLIENTE\n';
+  report += `Cliente: ${currentClient.nome} | Código: ${currentClient.codigo}\n`;
   report += '═'.repeat(40) + '\n\n';
-  Object.entries(FIELD_LABELS).forEach(([key, label]) => {
-    const val = answers[key] || 'Não informado';
-    report += `▪ ${label}:\n${val}\n\n`;
+  clientFields.forEach(f => {
+    report += `▪ ${f.question}:\n${f.answer || 'Não informado'}\n\n`;
   });
   report += '═'.repeat(40) + '\n';
   report += `Gerado em: ${new Date().toLocaleString('pt-BR')}`;
 
-  // Use mailto as fallback (works without backend)
-  const subject = encodeURIComponent(`[GMN] Novo Cliente – ${answers.nome_empresa || 'Cadastro'}`);
+  const subject = encodeURIComponent(`[GMN] Novo Cliente – ${currentClient.nome}`);
   const body = encodeURIComponent(report);
   const mailto = `mailto:${email}?subject=${subject}&body=${body}`;
 
-  // Show success in modal
   const modal = document.getElementById('modal');
   modal.innerHTML = `
     <div class="success-msg">
       <div class="success-icon">🎉</div>
       <h3>Informações enviadas!</h3>
-      <p>O relatório foi preparado e o seu cliente de e-mail será aberto automaticamente para enviar ao consultor.<br><br>
+      <p>O relatório será aberto no seu cliente de e-mail.<br><br>
       <strong>${email}</strong></p>
       <div style="margin-top:24px;">
         <button class="btn btn-secondary" onclick="document.getElementById('overlay').classList.remove('open')">Fechar</button>
@@ -926,7 +1030,6 @@ async function sendEmail() {
     </div>
   `;
 
-  // Open mailto
   setTimeout(() => { window.location.href = mailto; }, 500);
 }
 
@@ -935,15 +1038,14 @@ async function sendEmail() {
 // ═══════════════════════════════════════════════════
 async function init() {
   setupVoice();
-  setProgress(2, 'Iniciando...');
-
-  // Carrega vozes adiantado para a saudação
   if (window.speechSynthesis) loadVoices();
-  
-  // Initial greeting
-  await callGemini('Olá! Quero cadastrar meu negócio no Google Meu Negócio. Por favor, me ajude.');
-  sendBtn.disabled = false;
-  userInput.disabled = false;
+  setProgress(0, 'Aguardando código...');
+
+  // Mensagem inicial (sem IA — é local)
+  const greeting = 'Olá! 👋 Eu sou o **Bê**, seu assistente do Google Meu Negócio.\n\nPara começarmos, por favor, digite ou fale o seu **código de acesso**.\n\nEsse código foi fornecido pelo seu consultor. 🔐';
+  appendMessage('bot', greeting);
+  speakText('Olá! Eu sou o Bê, seu assistente do Google Meu Negócio. Para começarmos, por favor, digite ou fale o seu código de acesso.');
+
   userInput.focus();
 }
 
