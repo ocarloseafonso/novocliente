@@ -24,11 +24,12 @@ function doPost(e) { return handleRequest(e); }
 
 function handleRequest(e) {
   try {
-    let params;
-    if (e.postData) {
+    // Prioriza parâmetros GET (e.parameter) — evita bloqueios de CORS do browser
+    let params = e.parameter || {};
+
+    // Fallback para POST body se não tiver action no GET
+    if (!params.action && e.postData && e.postData.contents) {
       params = JSON.parse(e.postData.contents);
-    } else {
-      params = e.parameter;
     }
 
     const action = params.action;
@@ -41,7 +42,7 @@ function handleRequest(e) {
       case 'createClientTab':
         return createClientTab(params.codigo);
       case 'saveAnswer':
-        return saveAnswer(params.codigo, params.rowIndex, params.resposta);
+        return saveAnswer(params.codigo, Number(params.rowIndex), params.resposta);
       case 'getFormQuestions':
         return getFormQuestions();
       default:
