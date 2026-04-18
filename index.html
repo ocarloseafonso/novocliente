@@ -450,12 +450,8 @@ function stopAudio() {
   audioPlayId++;
   if (currentAudio) {
     try {
-      if (currentAudio._isBufferSource) {
-        currentAudio.stop();
-      } else {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-      }
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
     } catch(e) { /* já parado */ }
     currentAudio = null;
   }
@@ -935,56 +931,89 @@ voiceBtn.addEventListener('click', (e) => {
 // Text-to-Speech (TTS) com Voz de Cinema (OpenAI)
 // ═══════════════════════════════════════════════════
 
-// ── AudioContext para desbloquear playback ──
-// Navegadores modernos exigem interação do usuário antes de tocar áudio.
-// Criamos um AudioContext e o "desbloqueamos" no primeiro clique/toque.
-let audioCtx = null;
+// ── Unlock de áudio do navegador ──
+// Navegadores bloqueiam audio.play() até a primeira interação do usuário.
+// Rastreamos se o usuário já interagiu para saber quando podemos tocar.
 let audioUnlocked = false;
-let pendingSpeech = null; // Guarda texto que tentou falar antes do unlock
-
-function getAudioContext() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  return audioCtx;
-}
+let pendingSpeech = null;
+let prefetchedAudioUrls = {}; // Cache de áudios pré-carregados
 
 function unlockAudio() {
   if (audioUnlocked) return;
-  const ctx = getAudioContext();
-  if (ctx.state === 'suspended') {
-    ctx.resume().then(() => {
-      console.log('✅ AudioContext desbloqueado com sucesso');
-      audioUnlocked = true;
-      // Se havia uma fala pendente de antes do unlock, reproduzir agora
-      if (pendingSpeech) {
-        const { text, onEnd } = pendingSpeech;
-        pendingSpeech = null;
-        speakText(text, onEnd);
-      }
-    });
-  } else {
-    audioUnlocked = true;
-    if (pendingSpeech) {
-      const { text, onEnd } = pendingSpeech;
-      pendingSpeech = null;
-      speakText(text, onEnd);
-    }
+  audioUnlocked = true;
+  console.log('✅ Áudio desbloqueado pela interação do usuário');
+  
+  // Se havia uma fala pendente, reproduzir agora
+  if (pendingSpeech) {
+    const { text, onEnd } = pendingSpeech;
+    pendingSpeech = null;
+    speakText(text, onEnd);
   }
-  // Tocar som silencioso para garantir que o contexto está ativo
-  try {
-    const buf = ctx.createBuffer(1, 1, 22050);
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);
-    src.start(0);
-  } catch(e) { /* ignora */ }
 }
 
-// Registrar listeners de desbloqueio em eventos de interação do usuário
+// Registrar listeners de desbloqueio
 ['click', 'touchstart', 'keydown'].forEach(evt => {
   document.addEventListener(evt, unlockAudio, { once: false, passive: true });
 });
+
+// ── Pré-carregamento de áudio ──
+// Baixa o áudio da saudação em background durante o carregamento da página.
+// Isso também "aquece" a serverless function da Vercel, eliminando o cold start.
+const GREETING_TTS_TEXT = 'Olá! Eu sou a assistente virtual da C.E. Afonso. Sou responsável por realizar o seu cadastro aqui na empresa. Fique à vontade para digitar ou usar o microfone para falar comigo. Para começar, por favor me informe o seu código de acesso.';
+
+async function prefetchGreetingAudio() {
+  const clean = cleanTextForTTS(GREETING_TTS_TEXT);
+  if (!clean) return;
+  try {
+    console.log('⏳ Pré-carregando áudio da saudação...');
+    const res = await fetch(OPENAI_TTS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: clean, voice: 'nova' })
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      prefetchedAudioUrls[clean] = URL.createObjectURL(blob);
+      console.log('✅ Áudio da saudação pré-carregado e pronto!');
+    }
+  } catch(e) {
+    console.warn('Pré-carregamento falhou (normal se offline):', e);
+  }
+}
+
+// ── Limpeza de texto para TTS ──
+function cleanTextForTTS(text) {
+  let clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '');
+  clean = clean.replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '');
+  clean = clean.replace(/[^\w\s.,:;!?áéíóúãõâêîôûçÁÉÍÓÚÃÕÂÊÎÔÛÇ-]/gi, '');
+  return clean.trim();
+}
+
+// ── Setup padrão do elemento Audio ──
+function setupAudioElement(audio, expectedAudioId, onEnd) {
+  if (audioPlayId !== expectedAudioId) return;
+  
+  currentAudio = audio;
+  currentAudio._isBufferSource = false;
+  
+  const cleanup = () => {
+    if (currentAudio === audio) currentAudio = null;
+    if (onEnd) onEnd();
+  };
+  
+  audio.onended = cleanup;
+  audio.onerror = (e) => {
+    console.warn('Erro no elemento de áudio:', e);
+    cleanup();
+  };
+  
+  audio.play().then(() => {
+    console.log('🔊 Áudio TTS reproduzindo');
+  }).catch(e => {
+    console.warn('Playback impedido:', e);
+    cleanup();
+  });
+}
 
 function toggleTTS() {
   ttsEnabled = !ttsEnabled;
@@ -1002,29 +1031,43 @@ function toggleTTS() {
 async function speakText(text, onEnd) {
   if (!ttsEnabled) { if (onEnd) onEnd(); return; }
 
-  // Se o áudio ainda não foi desbloqueado pelo navegador,
-  // guardar o texto para reproduzir assim que o usuário interagir
+  // Se o áudio ainda não foi desbloqueado, guardar para depois
   if (!audioUnlocked) {
-    console.log('⏳ Áudio ainda bloqueado, aguardando interação do usuário...');
+    console.log('⏳ Aguardando interação do usuário para reproduzir áudio...');
     pendingSpeech = { text, onEnd };
     return;
   }
 
-  // Parar áudio atual se houver e registrar nova geração
+  // Parar áudio atual
   stopAudio();
   const myAudioId = audioPlayId;
 
-  // Limpar a formatação do markdown
-  let clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '');
-  // Remover os comandos técnicos de salvamento
-  clean = clean.replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '');
-  // Filtrar tudo que não for palavra, pontuação básica ou acentos em PT-BR (remove emojis com segurança em todos navegadores)
-  clean = clean.replace(/[^\w\s.,:;!?áéíóúãõâêîôûçÁÉÍÓÚÃÕÂÊÎÔÛÇ-]/gi, '');
-  
-  clean = clean.trim();
+  // Limpar texto
+  const clean = cleanTextForTTS(text);
   if (!clean) { if (onEnd) onEnd(); return; }
 
   try {
+    // ── 1. Verificar cache pré-carregado (instantâneo!) ──
+    if (prefetchedAudioUrls[clean]) {
+      console.log('⚡ Usando áudio pré-carregado do cache');
+      const audio = new Audio(prefetchedAudioUrls[clean]);
+      setupAudioElement(audio, myAudioId, onEnd);
+      return;
+    }
+
+    // ── 2. GET streaming: navegador começa a tocar enquanto baixa ──
+    const encodedInput = encodeURIComponent(clean);
+    const getUrl = `${OPENAI_TTS_URL}?input=${encodedInput}&voice=nova`;
+    
+    if (getUrl.length < 1800) {
+      // URL curta o suficiente para GET — mais rápido pois o navegador
+      // inicia o playback assim que recebe os primeiros bytes
+      const audio = new Audio(getUrl);
+      setupAudioElement(audio, myAudioId, onEnd);
+      return;
+    }
+
+    // ── 3. Fallback: POST para textos muito longos ──
     const res = await fetch(OPENAI_TTS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1032,67 +1075,23 @@ async function speakText(text, onEnd) {
     });
 
     if (!res.ok) throw new Error('Erro na API de voz');
-    
-    // Se o usuário interagiu cancelando o áudio enquanto baixava, descarta
     if (audioPlayId !== myAudioId) return;
 
-    const arrayBuffer = await res.arrayBuffer();
-    
-    // Checagem segura caso tenha interagido durante montagem final
+    const blob = await res.blob();
     if (audioPlayId !== myAudioId) return;
 
-    // Decodificar e reproduzir via AudioContext (ignora restrição de autoplay)
-    const ctx = getAudioContext();
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-    
-    if (audioPlayId !== myAudioId) return;
-
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(ctx.destination);
-    
-    // Guardar referência para poder parar
-    currentAudio = source;
-    currentAudio._isBufferSource = true;
-    
-    source.onended = () => {
-      if (currentAudio === source) currentAudio = null;
-      if (onEnd) onEnd();
-    };
-    
-    source.start(0);
-    console.log('🔊 Áudio TTS reproduzindo com sucesso');
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    // Limpar memória quando terminar
+    const origOnEnd = onEnd;
+    setupAudioElement(audio, myAudioId, () => {
+      URL.revokeObjectURL(url);
+      if (origOnEnd) origOnEnd();
+    });
 
   } catch (err) {
     console.error('Erro ao gerar voz:', err);
-    // Fallback: tentar com Audio element tradicional
-    try {
-      const res2 = await fetch(OPENAI_TTS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: clean, voice: 'nova' })
-      });
-      if (res2.ok) {
-        const blob = await res2.blob();
-        if (audioPlayId !== myAudioId) return;
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentAudio = audio;
-        currentAudio._isBufferSource = false;
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          if (currentAudio === audio) currentAudio = null;
-          if (onEnd) onEnd();
-        };
-        await audio.play();
-        console.log('🔊 Áudio TTS reproduzindo via fallback');
-      } else {
-        if (onEnd) onEnd();
-      }
-    } catch(e2) {
-      console.warn('Fallback de áudio também falhou:', e2);
-      if (onEnd) onEnd();
-    }
+    if (onEnd) onEnd();
   }
 }
 
@@ -1166,13 +1165,16 @@ async function init() {
   setupVoice();
   setProgress(0, 'Aguardando código...');
 
+  // Pré-carregar áudio da saudação em background (aquece Vercel + baixa áudio antecipadamente)
+  prefetchGreetingAudio();
+
   // Mensagem inicial
   const greeting = 'Olá! Eu sou a assistente virtual da C.E. Afonso.\n\nSou responsável por realizar o seu cadastro aqui na empresa. 😊\n\nFique à vontade para digitar ou usar o microfone para falar comigo!\n\nPara começar, por favor me informe o seu **código de acesso**.';
   appendMessage('bot', greeting);
   
-  // Com o TTS da OpenAI, não precisamos esperar carregar as vozes locais.
-  // Já podemos falar direto.
-  speakText('Olá! Eu sou a assistente virtual da C.E. Afonso. Sou responsável por realizar o seu cadastro aqui na empresa. Fique à vontade para digitar ou usar o microfone para falar comigo. Para começar, por favor me informe o seu código de acesso.');
+  // Falar a saudação (será reproduzida do cache se o prefetch terminou,
+  // ou ficará pendente até o primeiro clique do usuário)
+  speakText(GREETING_TTS_TEXT);
 
   userInput.focus();
 }
