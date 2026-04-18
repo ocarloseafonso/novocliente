@@ -449,8 +449,14 @@ let audioPlayId = 0;
 function stopAudio() {
   audioPlayId++;
   if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.currentTime = 0;
+    try {
+      if (currentAudio._isBufferSource) {
+        currentAudio.stop();
+      } else {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }
+    } catch(e) { /* já parado */ }
     currentAudio = null;
   }
 }
@@ -928,6 +934,58 @@ voiceBtn.addEventListener('click', (e) => {
 // ═══════════════════════════════════════════════════
 // Text-to-Speech (TTS) com Voz de Cinema (OpenAI)
 // ═══════════════════════════════════════════════════
+
+// ── AudioContext para desbloquear playback ──
+// Navegadores modernos exigem interação do usuário antes de tocar áudio.
+// Criamos um AudioContext e o "desbloqueamos" no primeiro clique/toque.
+let audioCtx = null;
+let audioUnlocked = false;
+let pendingSpeech = null; // Guarda texto que tentou falar antes do unlock
+
+function getAudioContext() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  const ctx = getAudioContext();
+  if (ctx.state === 'suspended') {
+    ctx.resume().then(() => {
+      console.log('✅ AudioContext desbloqueado com sucesso');
+      audioUnlocked = true;
+      // Se havia uma fala pendente de antes do unlock, reproduzir agora
+      if (pendingSpeech) {
+        const { text, onEnd } = pendingSpeech;
+        pendingSpeech = null;
+        speakText(text, onEnd);
+      }
+    });
+  } else {
+    audioUnlocked = true;
+    if (pendingSpeech) {
+      const { text, onEnd } = pendingSpeech;
+      pendingSpeech = null;
+      speakText(text, onEnd);
+    }
+  }
+  // Tocar som silencioso para garantir que o contexto está ativo
+  try {
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch(e) { /* ignora */ }
+}
+
+// Registrar listeners de desbloqueio em eventos de interação do usuário
+['click', 'touchstart', 'keydown'].forEach(evt => {
+  document.addEventListener(evt, unlockAudio, { once: false, passive: true });
+});
+
 function toggleTTS() {
   ttsEnabled = !ttsEnabled;
   const el = document.getElementById('ttsToggle');
@@ -944,6 +1002,14 @@ function toggleTTS() {
 async function speakText(text, onEnd) {
   if (!ttsEnabled) { if (onEnd) onEnd(); return; }
 
+  // Se o áudio ainda não foi desbloqueado pelo navegador,
+  // guardar o texto para reproduzir assim que o usuário interagir
+  if (!audioUnlocked) {
+    console.log('⏳ Áudio ainda bloqueado, aguardando interação do usuário...');
+    pendingSpeech = { text, onEnd };
+    return;
+  }
+
   // Parar áudio atual se houver e registrar nova geração
   stopAudio();
   const myAudioId = audioPlayId;
@@ -959,8 +1025,6 @@ async function speakText(text, onEnd) {
   if (!clean) { if (onEnd) onEnd(); return; }
 
   try {
-    // Voltando para o Fetch + Blob, pois o streaming da tag Audio às vezes engasga no primeiro chunk (lendo correndo/pulando palavras).
-    // O pequeno delay agora é ocultado pela mensagem imediata do lado de fora.
     const res = await fetch(OPENAI_TTS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -972,31 +1036,63 @@ async function speakText(text, onEnd) {
     // Se o usuário interagiu cancelando o áudio enquanto baixava, descarta
     if (audioPlayId !== myAudioId) return;
 
-    const blob = await res.blob();
+    const arrayBuffer = await res.arrayBuffer();
     
     // Checagem segura caso tenha interagido durante montagem final
     if (audioPlayId !== myAudioId) return;
 
-    const url = URL.createObjectURL(blob);
+    // Decodificar e reproduzir via AudioContext (ignora restrição de autoplay)
+    const ctx = getAudioContext();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
     
-    currentAudio = new Audio(url);
-    if (onEnd) {
-      currentAudio.onended = () => {
-        onEnd();
-        URL.revokeObjectURL(url); // limpa memoria
-      };
-    } else {
-      currentAudio.onended = () => URL.revokeObjectURL(url);
-    }
+    if (audioPlayId !== myAudioId) return;
+
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
     
-    currentAudio.play().catch(e => {
-      console.warn('Playback impedido pelo navegador:', e);
+    // Guardar referência para poder parar
+    currentAudio = source;
+    currentAudio._isBufferSource = true;
+    
+    source.onended = () => {
+      if (currentAudio === source) currentAudio = null;
       if (onEnd) onEnd();
-    });
+    };
+    
+    source.start(0);
+    console.log('🔊 Áudio TTS reproduzindo com sucesso');
 
   } catch (err) {
     console.error('Erro ao gerar voz:', err);
-    if (onEnd) onEnd();
+    // Fallback: tentar com Audio element tradicional
+    try {
+      const res2 = await fetch(OPENAI_TTS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: clean, voice: 'nova' })
+      });
+      if (res2.ok) {
+        const blob = await res2.blob();
+        if (audioPlayId !== myAudioId) return;
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudio = audio;
+        currentAudio._isBufferSource = false;
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          if (currentAudio === audio) currentAudio = null;
+          if (onEnd) onEnd();
+        };
+        await audio.play();
+        console.log('🔊 Áudio TTS reproduzindo via fallback');
+      } else {
+        if (onEnd) onEnd();
+      }
+    } catch(e2) {
+      console.warn('Fallback de áudio também falhou:', e2);
+      if (onEnd) onEnd();
+    }
   }
 }
 
