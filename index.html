@@ -439,7 +439,7 @@ function buildSystemPrompt(clientData, questions, fieldsState) {
     .map(f => `ID: ${f.rowIndex} | Pergunta: ${f.question}`)
     .join('\n');
 
-  return `Você é "Bê", uma assistente virtual carismática, calorosa e super humana da C.E. Afonso Soluções Digitais. Você ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
+  return `Você é uma assistente virtual carismática, calorosa e super humana da C.E. Afonso Soluções Digitais. Você ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
 
 REGRAS DE COMPORTAMENTO:
 1. SEJA HUMANA: Use linguagem natural do cotidiano brasileiro. Expresse emoções genuínas ("Que ótimo!", "Perfeito!", "Ah, entendi!"). Evite palavras formais desnecessárias.
@@ -1025,10 +1025,10 @@ async function init() {
 
   await waitForVoices();
 
-  // Mensagem inicial da Bê
-  const greeting = 'Olá! Eu sou a **Bê**, assistente virtual da C.E. Afonso.\n\nSou responsável por realizar o seu cadastro no Google Meu Negócio. 😊\n\nFique à vontade para digitar ou usar o microfone para falar comigo!\n\nPara começar, por favor me informe o seu **código de acesso**.';
+  // Mensagem inicial
+  const greeting = 'Olá! Eu sou sua assistente virtual da C.E. Afonso.\n\nSou responsável por realizar o seu cadastro no Google Meu Negócio. 😊\n\nFique à vontade para digitar ou usar o microfone para falar comigo!\n\nPara começar, por favor me informe o seu **código de acesso**.';
   appendMessage('bot', greeting);
-  speakText('Olá! Eu sou a Bê, assistente virtual da C.E. Afonso. Sou responsável por realizar o seu cadastro no Google Meu Negócio. Fique à vontade para digitar ou usar o microfone para falar comigo. Para começar, me informe o seu código de acesso.');
+  speakText('Olá! Eu sou sua assistente virtual da C.E. Afonso. Sou responsável por realizar o seu cadastro no Google Meu Negócio. Fique à vontade para digitar ou usar o microfone para falar comigo. Para começar, me informe o seu código de acesso.');
 
   userInput.focus();
 }
