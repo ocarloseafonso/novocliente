@@ -550,7 +550,7 @@ function buildSystemPrompt(clientData, questions, fieldsState) {
 
   const pendingStr = fieldsState
     .filter(f => !f.answer)
-    .map(f => `- ${f.question}`)
+    .map(f => `ID: ${f.rowIndex} | Pergunta: ${f.question}`)
     .join('\n');
 
   return `Você é "Bê", um assistente simpático e extremamente humano que ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
@@ -573,10 +573,10 @@ ${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendin
 Para cada resposta que o cliente der, confirme brevemente (1 frase) e passe para a próxima pergunta pendente.
 
 IMPORTANTE - SALVAMENTO DE DADOS:
-Para cada informação nova que o cliente fornecer, você DEVE obrigatoriamente incluir no final da sua mensagem o marcador técnico:
-[SALVAR|pergunta exata|resposta]
-Exemplo: Se ele disse que o nome da empresa é "Bar do Zé", você escreve sua resposta simpática e termina com [SALVAR|Nome da Empresa|Bar do Zé].
-Use a pergunta EXATA conforme listada abaixo nas "Perguntas Pendentes".
+Para cada informação nova que o cliente fornecer, você DEVE obrigatoriamente incluir no final da sua mensagem o marcador técnico com o ID da pergunta:
+[SALVAR|ID|resposta]
+Exemplo: Se a pergunta era "ID: 2 | Nome da empresa" e o cliente disse "Bar do Zé", você escreve sua resposta simpática e termina com:
+[SALVAR|2|Bar do Zé]
 
 Quando TODAS as perguntas forem respondidas, diga "COLETA_COMPLETA" no final da sua mensagem.`;
 }
@@ -812,22 +812,15 @@ async function callOpenAI(userMsg) {
 // ═══════════════════════════════════════════════════
 // PROCESSAR MARCADORES [SALVAR]
 // ═══════════════════════════════════════════════════
-async function processSaveMarker(questionText, answerText) {
-  // Encontrar a pergunta que mais se parece no clientFields
-  let bestMatch = null;
-  let bestScore = 0;
+async function processSaveMarker(idStr, answerText) {
+  const targetId = parseInt(idStr, 10);
+  if (isNaN(targetId)) return;
 
-  for (const field of clientFields) {
-    const score = similarity(field.question.toLowerCase(), questionText.toLowerCase());
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = field;
-    }
-  }
+  const match = clientFields.find(f => f.rowIndex === targetId);
 
-  if (bestMatch && bestScore > 0.3) {
-    bestMatch.answer = answerText;
-    console.log(`💾 Salvando: ${bestMatch.question} = ${answerText}`);
+  if (match) {
+    match.answer = answerText;
+    console.log(`💾 Salvando ID ${targetId} (${match.question}): ${answerText}`);
     
     // Feedback visual discreto de salvamento
     const statusEl = document.getElementById('progressLabel');
@@ -835,26 +828,15 @@ async function processSaveMarker(questionText, answerText) {
     statusEl.textContent = "☁️ Sincronizando...";
     
     // Salvar na planilha
-    const res = await callAppsScript({
+    await callAppsScript({
       action: 'saveAnswer',
       codigo: currentClient.codigo,
-      rowIndex: bestMatch.rowIndex,
+      rowIndex: match.rowIndex,
       resposta: answerText
     });
     
     setTimeout(() => { statusEl.textContent = originalText; }, 1000);
   }
-}
-
-// Similaridade simples entre strings
-function similarity(s1, s2) {
-  const words1 = s1.split(/\s+/);
-  const words2 = s2.split(/\s+/);
-  let matches = 0;
-  for (const w of words1) {
-    if (words2.some(w2 => w2.includes(w) || w.includes(w2))) matches++;
-  }
-  return matches / Math.max(words1.length, words2.length);
 }
 
 // ═══════════════════════════════════════════════════
