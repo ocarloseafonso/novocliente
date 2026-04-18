@@ -444,6 +444,16 @@ let recognition = null;
 let isListening = false;
 let ttsEnabled = true;
 let currentAudio = null;
+let audioPlayId = 0;
+
+function stopAudio() {
+  audioPlayId++;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+}
 
 // ═══════════════════════════════════════════════════
 // SYSTEM PROMPT (dinâmico)
@@ -805,10 +815,7 @@ function handleSend() {
   if (!text || isWaiting) return;
 
   // ★ INTERROMPE a voz da assistente na hora que o usuário envia mensagem
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.currentTime = 0;
-  }
+  stopAudio();
 
   userInput.value = '';
   userInput.style.height = 'auto';
@@ -832,6 +839,7 @@ userInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
 });
 userInput.addEventListener('input', () => {
+  stopAudio();
   userInput.style.height = 'auto';
   userInput.style.height = userInput.scrollHeight + 'px';
 });
@@ -908,10 +916,7 @@ voiceBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   if (!recognition) return;
   
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.currentTime = 0;
-  }
+  stopAudio();
   if (shouldListen) {
     shouldListen = false;
     recognition.stop();
@@ -933,21 +938,16 @@ function toggleTTS() {
   } else {
     el.classList.remove('active');
     el.innerHTML = '🔇 Mudo';
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio.currentTime = 0;
-    }
+    stopAudio();
   }
 }
 
 async function speakText(text, onEnd) {
   if (!ttsEnabled) { if (onEnd) onEnd(); return; }
 
-  // Parar áudio atual se houver
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.currentTime = 0;
-  }
+  // Parar áudio atual se houver e registrar nova geração
+  stopAudio();
+  const myAudioId = audioPlayId;
 
   // Limpar a formatação do markdown
   let clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '');
@@ -967,8 +967,15 @@ async function speakText(text, onEnd) {
     });
 
     if (!res.ok) throw new Error('Erro na API de voz');
+    
+    // Se o usuário interagiu cancelando o áudio enquanto baixava, descarta
+    if (audioPlayId !== myAudioId) return;
 
     const blob = await res.blob();
+    
+    // Checagem segura caso tenha interagido durante montagem final
+    if (audioPlayId !== myAudioId) return;
+
     const url = URL.createObjectURL(blob);
     
     currentAudio = new Audio(url);
