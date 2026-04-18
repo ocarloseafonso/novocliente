@@ -3,20 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agente GMN – Cadastro de Empresa</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<title>Formulário de Novo Cliente</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&family=Playfair+Display:ital,wght@1,500;1,600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0a0f;
-    --surface: #13131a;
-    --surface2: #1c1c27;
-    --border: #2a2a3a;
-    --accent: #4f8eff;
-    --accent2: #a78bfa;
+    --bg: #090306;
+    --surface: rgba(20, 10, 15, 0.5);
+    --surface2: rgba(255, 255, 255, 0.05);
+    --border: rgba(255, 255, 255, 0.06);
+    --accent: #d92070;
+    --accent-glow: #ff4c99;
+    --accent2: #a11f59;
     --green: #34d399;
     --red: #f87171;
-    --text: #e8e8f0;
-    --muted: #7070a0;
+    --text: #f0e6ea;
+    --muted: #a38c95;
     --radius: 16px;
   }
 
@@ -24,68 +25,71 @@
 
   body {
     font-family: 'DM Sans', sans-serif;
-    background: var(--bg);
+    background: #090306 radial-gradient(circle at top right, #380721 0%, transparent 50%), radial-gradient(circle at bottom left, #4a0d33 0%, transparent 50%);
+    background-attachment: fixed;
     color: var(--text);
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 0;
+    padding: 40px 20px;
+  }
+
+  /* ── Container ── */
+  .app-container {
+    width: 100%;
+    max-width: 820px;
+    background: var(--surface);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 32px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.6);
   }
 
   /* ── Header ── */
   header {
     width: 100%;
-    max-width: 760px;
-    padding: 28px 24px 0;
+    padding: 30px 40px 15px;
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 24px;
+    position: relative;
   }
 
-  .logo {
-    font-family: 'Syne', sans-serif;
-    font-weight: 800;
-    font-size: 22px;
-    letter-spacing: -0.5px;
-    color: #fff;
-  }
-  .logo span { color: var(--accent); }
-
-  .badge {
+  .logo-box {
+    width: 80px;
+    height: 60px;
+    background: #9d295a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-size: 11px;
-    font-weight: 500;
-    background: rgba(79,142,255,.15);
-    color: var(--accent);
-    border: 1px solid rgba(79,142,255,.3);
-    padding: 3px 10px;
-    border-radius: 20px;
-    margin-left: auto;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 1.5px;
   }
 
-  /* ── TTS Toggle ── */
-  .tts-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--muted);
-    cursor: pointer;
-    user-select: none;
-    padding: 4px 10px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    transition: all .2s;
+  .header-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 26px;
+    color: #f7e6c1; /* Soft gold from screenshot */
+    font-style: italic;
+    font-weight: 500;
+    flex: 1;
   }
-  .tts-toggle:hover { border-color: var(--accent); color: var(--accent); }
-  .tts-toggle.active { border-color: var(--green); color: var(--green); background: rgba(52,211,153,.1); }
+
+  /* ── TTS Toggle (Escondido visualmente mas mantendo funcionalidade) ── */
+  .tts-toggle {
+    display: none;
+  }
 
   /* ── Progress ── */
   .progress-wrap {
     width: 100%;
-    max-width: 760px;
-    padding: 20px 24px 0;
+    padding: 10px 40px 0;
   }
   .progress-label {
     font-size: 12px;
@@ -95,14 +99,15 @@
     justify-content: space-between;
   }
   .progress-bar {
-    height: 4px;
-    background: var(--border);
+    height: 2px;
+    background: rgba(255,255,255,0.08);
     border-radius: 4px;
     overflow: hidden;
   }
   .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
     border-radius: 4px;
     transition: width .6s cubic-bezier(.4,0,.2,1);
     width: 0%;
@@ -111,8 +116,7 @@
   /* ── Chat container ── */
   .chat-wrap {
     width: 100%;
-    max-width: 760px;
-    padding: 20px 24px;
+    padding: 24px 40px;
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -122,16 +126,16 @@
   #chatBox {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    min-height: 300px;
+    gap: 20px;
+    min-height: 250px;
   }
 
   /* ── Messages ── */
   .msg {
     display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    animation: fadeUp .35s ease both;
+    gap: 12px;
+    align-items: flex-end;
+    animation: fadeUp .3s ease both;
   }
 
   @keyframes fadeUp {
@@ -142,84 +146,46 @@
   .msg.user { flex-direction: row-reverse; }
 
   .avatar {
-    width: 34px;
-    height: 34px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: 18px;
   }
 
   .avatar.bot {
     background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 15px rgba(217, 32, 112, 0.4);
   }
 
   .avatar.user {
     background: var(--surface2);
     border: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--muted);
+    font-size: 14px;
+    color: var(--accent-glow);
   }
 
   .bubble {
-    max-width: 78%;
-    padding: 14px 18px;
-    border-radius: var(--radius);
-    line-height: 1.6;
+    max-width: 75%;
+    padding: 16px 20px;
+    line-height: 1.5;
     font-size: 15px;
   }
 
   .bubble.bot {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-top-left-radius: 4px;
+    background: rgba(10, 5, 8, 0.4);
+    border: 1px solid rgba(217, 32, 112, 0.15);
+    border-radius: 16px 16px 16px 4px;
   }
 
   .bubble.user {
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 4px 15px rgba(217, 32, 112, 0.3);
     color: #fff;
-    border-top-right-radius: 4px;
-  }
-
-  /* tip inside bot bubble */
-  .tip {
-    margin-top: 10px;
-    padding: 10px 12px;
-    background: rgba(167,139,250,.1);
-    border-left: 3px solid var(--accent2);
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--accent2);
-    line-height: 1.5;
-  }
-
-  /* options chips */
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
-  }
-
-  .chip {
-    padding: 7px 14px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    color: var(--text);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all .2s;
-    font-family: 'DM Sans', sans-serif;
-    user-select: none;
-  }
-
-  .chip:hover, .chip.selected {
-    background: rgba(79,142,255,.18);
-    border-color: var(--accent);
-    color: var(--accent);
+    border-radius: 16px 16px 4px 16px;
   }
 
   /* ── Typing indicator ── */
@@ -230,8 +196,8 @@
     padding: 14px 18px;
   }
   .typing span {
-    width: 7px; height: 7px;
-    background: var(--muted);
+    width: 6px; height: 6px;
+    background: var(--accent-glow);
     border-radius: 50%;
     animation: bounce .9s infinite ease-in-out;
   }
@@ -245,20 +211,53 @@
   /* ── Input area ── */
   .input-area {
     width: 100%;
-    max-width: 760px;
-    padding: 0 24px 28px;
-    position: sticky;
-    bottom: 0;
-    background: linear-gradient(to top, var(--bg) 80%, transparent);
+    padding: 20px 40px 30px;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .voice-group {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    gap: 10px;
+    color: var(--muted);
+    transition: color .2s;
+  }
+  .voice-group:hover, .voice-group.listening { color: var(--accent-glow); }
+  .voice-text { font-size: 13px; white-space: nowrap; }
+
+  #voiceBtn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 44px; height: 44px;
+    color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .voice-group.listening #voiceBtn {
+    background: rgba(217, 32, 112, 0.15);
+    border-color: var(--accent-glow);
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255, 76, 153,.3); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 76, 153, 0); }
   }
 
   .input-box {
-    display: flex;
-    gap: 10px;
-    background: var(--surface);
+    flex: 1;
+    background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 10px 10px 10px 18px;
+    border-radius: 30px;
+    padding: 14px 20px;
+    display: flex;
     align-items: center;
     transition: border-color .2s;
   }
@@ -271,63 +270,36 @@
     outline: none;
     color: var(--text);
     font-family: 'DM Sans', sans-serif;
-    font-size: 15px;
+    font-size: 14px;
     resize: none;
-    max-height: 120px;
-    line-height: 1.5;
+    max-height: 100px;
+    line-height: 1.4;
   }
-  #userInput::placeholder { color: var(--muted); }
+  #userInput::placeholder { color: var(--border); }
 
-  .btn-icon {
-    width: 40px; height: 40px;
-    border-radius: 10px;
+  #sendBtn {
+    background: linear-gradient(135deg, var(--accent), var(--accent-glow));
+    border-radius: 50%;
+    width: 44px; height: 44px;
+    color: #fff;
     border: none;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: all .2s;
-    flex-shrink: 0;
-    font-size: 18px;
+    font-size: 16px;
+    box-shadow: 0 4px 15px rgba(217, 32, 112, 0.4);
   }
-
-  #sendBtn {
-    background: var(--accent);
-    color: #fff;
-  }
-  #sendBtn:hover { background: #3a7aec; }
-  #sendBtn:disabled { background: var(--border); cursor: not-allowed; }
-
-  #voiceBtn {
-    background: var(--surface2);
-    color: var(--muted);
-    border: 1px solid var(--border);
-  }
-  #voiceBtn:hover { color: var(--text); }
-  #voiceBtn.listening {
-    background: rgba(248,113,113,.15);
-    border-color: var(--red);
-    color: var(--red);
-    animation: pulse 1.2s infinite;
-  }
-  @keyframes pulse {
-    0%,100% { box-shadow: 0 0 0 0 rgba(248,113,113,.4); }
-    50% { box-shadow: 0 0 0 6px rgba(248,113,113,0); }
-  }
-
-  .voice-hint {
-    text-align: center;
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 8px;
-  }
+  #sendBtn:hover { transform: scale(1.05); }
+  #sendBtn:disabled { filter: grayscale(1); opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 
   /* ── Review modal ── */
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,.75);
-    backdrop-filter: blur(6px);
+    background: rgba(0,0,0,.8);
+    backdrop-filter: blur(8px);
     z-index: 100;
     display: flex;
     align-items: center;
@@ -337,15 +309,12 @@
     pointer-events: none;
     transition: opacity .3s;
   }
-  .overlay.open {
-    opacity: 1;
-    pointer-events: all;
-  }
+  .overlay.open { opacity: 1; pointer-events: all; }
 
   .modal {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 20px;
+    border-radius: 24px;
     width: 100%;
     max-width: 680px;
     max-height: 85vh;
@@ -356,109 +325,16 @@
   }
   .overlay.open .modal { transform: translateY(0); }
 
-  .modal h2 {
-    font-family: 'Syne', sans-serif;
-    font-size: 22px;
-    margin-bottom: 6px;
-  }
-  .modal .sub {
-    color: var(--muted);
-    font-size: 14px;
-    margin-bottom: 24px;
-  }
+  .modal h2 { font-family: 'Syne', sans-serif; font-size: 22px; margin-bottom: 6px; }
+  .modal .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
 
-  .qa-item {
-    padding: 16px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    margin-bottom: 12px;
-  }
-  .qa-q {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: .6px;
-    color: var(--accent);
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-  .qa-a {
-    font-size: 15px;
-    line-height: 1.6;
-    color: var(--text);
-  }
-  .qa-a.empty { color: var(--muted); font-style: italic; }
+  .qa-item { padding: 16px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; }
+  .qa-q { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--accent-glow); font-weight: 600; margin-bottom: 6px; }
+  .qa-a { font-size: 15px; color: var(--text); }
 
-  .modal-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 24px;
-    flex-wrap: wrap;
-  }
-
-  .btn {
-    padding: 12px 22px;
-    border-radius: 10px;
-    border: none;
-    cursor: pointer;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    transition: all .2s;
-  }
-  .btn-primary {
-    background: var(--accent);
-    color: #fff;
-    flex: 1;
-  }
-  .btn-primary:hover { background: #3a7aec; }
-  .btn-secondary {
-    background: var(--surface2);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
-
-  .btn-success {
-    background: var(--green);
-    color: #0a0a0f;
-    font-weight: 600;
-    flex: 1;
-  }
-
-  /* email field in modal */
-  .email-field {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 8px 14px;
-    margin-top: 14px;
-  }
-  .email-field label { font-size: 13px; color: var(--muted); white-space: nowrap; }
-  .email-field input {
-    flex: 1;
-    background: none;
-    border: none;
-    outline: none;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-  }
-
-  /* success screen */
-  .success-msg {
-    text-align: center;
-    padding: 40px 20px;
-  }
-  .success-icon { font-size: 52px; margin-bottom: 16px; }
-  .success-msg h3 {
-    font-family: 'Syne', sans-serif;
-    font-size: 22px;
-    margin-bottom: 8px;
-  }
-  .success-msg p { color: var(--muted); font-size: 15px; line-height: 1.6; }
+  .btn { padding: 12px 22px; border-radius: 10px; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; transition: all .2s; }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 24px; }
 
   /* scrollbar */
   ::-webkit-scrollbar { width: 6px; }
@@ -468,31 +344,37 @@
 </head>
 <body>
 
-<header>
-  <div class="logo">GMN<span>.</span>agente</div>
-  <div class="tts-toggle active" id="ttsToggle" onclick="toggleTTS()">🔊 Voz</div>
-  <div class="badge">Google Meu Negócio</div>
-</header>
+<div class="app-container">
+  <header>
+    <div class="logo-box">LOGO</div>
+    <div class="header-title">Formulário de Novo Cliente</div>
+    <div class="tts-toggle active" id="ttsToggle" onclick="toggleTTS()">🔊 Voz</div>
+  </header>
 
-<div class="progress-wrap">
-  <div class="progress-label">
-    <span id="progressLabel">Aguardando código...</span>
-    <span id="progressPct">0%</span>
+  <div class="progress-wrap">
+    <div class="progress-label">
+      <span id="progressLabel">Iniciando cadastro...</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
   </div>
-  <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-</div>
 
-<div class="chat-wrap">
-  <div id="chatBox"></div>
-</div>
-
-<div class="input-area">
-  <div class="input-box">
-    <textarea id="userInput" rows="1" placeholder="Digite seu código de acesso..."></textarea>
-    <button class="btn-icon" id="voiceBtn" title="Falar">🎤</button>
-    <button class="btn-icon" id="sendBtn">➤</button>
+  <div class="chat-wrap">
+    <div id="chatBox"></div>
   </div>
-  <div class="voice-hint" id="voiceHint">Pressione 🎤 para responder por voz</div>
+
+  <div class="input-area">
+    <div class="voice-group" id="voiceGroup" onclick="document.getElementById('voiceBtn').click()">
+      <button id="voiceBtn" title="Falar">🎤</button>
+      <span class="voice-text" id="voiceHint">Ativar o microfone</span>
+    </div>
+    
+    <div class="input-box">
+      <textarea id="userInput" rows="1" placeholder="Digite a sua resposta..."></textarea>
+    </div>
+    
+    <button id="sendBtn">➤</button>
+  </div>
 </div>
 
 <!-- Review Modal -->
