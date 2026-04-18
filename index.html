@@ -719,7 +719,7 @@ const OPENAI_TTS_URL = "/api/tts";
 const OPENAI_MODEL = "gpt-4o-mini";
 
 // URL do Apps Script (Banco de Dados Google Sheets)
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxleLcPyzOltI6NkgAfdzth1RuC0dtxlzT8c-iBKV2uVjM89WpPX7SQ9oHwsP3-rVNjMA/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzbCy9cLtG82vmMRlTbWzLdmt2_3Fcbd3iZfbWZjpERHDPBBWfx4PbwjwR7etkmikLN9g/exec";
 
 const CONSULTANT_EMAIL_DEFAULT = "";
 
@@ -786,28 +786,29 @@ CLIENTE ATUAL:
 ${answeredStr ? `JÁ RESPONDIDAS (não pergunte sobre elas novamente):\n${answeredStr}\n` : ''}
 ${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendingStr}\n` : ''}
 
-SISTEMA DE SALVAMENTO:
-Quando o cliente fornecer uma informação:
+SISTEMA DE SALVAMENTO — REGRA ABSOLUTA:
+SEMPRE que o cliente fornecer qualquer resposta para uma pergunta, você OBRIGATORIAMENTE deve incluir o marcador de salvamento no final da sua mensagem:
 
-1. PRIMEIRO, avalie se a informação parece válida e coerente:
-   - Nome/sobrenome: deve ter pelo menos 2 palavras
-   - Telefone: deve ter formato de número de telefone
-   - E-mail: deve conter @ e ponto
-   - Cidade/Estado: deve ser um nome de cidade e estado brasileiro reconhecível
-   - Se a resposta não faz sentido para a pergunta (ex: diz "não sei" como nome), sinalize.
+[SALVAR|ID|resposta]
 
-2. SE A INFORMAÇÃO PARECER SUSPEITA OU INVÁLIDA, não salve ainda. Diga que achou estranha e pergunte:
-   [CONFIRMAR|ID|resposta_suspeita]
-   Formato da mensagem: "Hmm, isso parece um pouco diferente do que eu esperava para [campo]. Você disse '...'. Quer confirmar dessa forma mesmo ou prefere corrigir?"
+Onde:
+- ID = o número que aparece no campo "ID:" da pergunta pendente
+- resposta = exatamente o que o cliente respondeu (transcreva fielmente)
 
-3. SE A INFORMAÇÃO PARECER VÁLIDA, salve normalmente:
-   [SALVAR|ID|resposta]
+REGRAS CRÍTICAS:
+- NUNCA omita o marcador [SALVAR]. Sempre inclua, sem exceção.
+- Salve MESMO que a resposta pareça estranha, incompleta ou curta.
+- Se o cliente disse "não sei", salve [SALVAR|ID|não sei].
+- Se o cliente disse "não tenho", salve [SALVAR|ID|não tenho].
+- Coloque o marcador no FINAL da mensagem, depois do texto normal.
+- O marcador é invisível para o usuário, mas essencial para o sistema.
 
-Exemplo prático:
-- Pergunta "ID: 2 | Telefone", cliente disse "bom dia" → use [CONFIRMAR|2|bom dia]
-- Pergunta "ID: 2 | Telefone", cliente disse "11 99999-0000" → use [SALVAR|2|11 99999-0000]
+Exemplos CORRETOS:
+- "Ótimo! Anotado. Agora me diga..." → [SALVAR|2|Carlos Silva]
+- "Perfeito! Vamos continuar." → [SALVAR|5|11 99999-0000]
+- "Entendido! Não há problema." → [SALVAR|8|não sei]
 
-Quando TODAS as perguntas forem respondidas, diga "COLETA_COMPLETA" no final.`;
+Quando TODAS as perguntas pendentes tiverem sido respondidas e salvas, diga "COLETA_COMPLETA" no final da mensagem.`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -1016,22 +1017,16 @@ async function callOpenAI(userMsg) {
     conversationHistory.push({ role: 'assistant', content: reply });
     removeTyping();
 
-    // Processar marcadores de salvamento e confirmação
-    // Regex melhorada: suporta espaços extras e caracteres variados no valor
-    const confirmMatches = [...reply.matchAll(/\[CONFIRMAR\s*\|\s*([^|\]]+)\s*\|\s*([^\]]+)\]/g)];
-    const saveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*([^|\]]+)\s*\|\s*([^\]]+)\]/g)];
-    
-    if (confirmMatches.length > 0) {
-      console.log("🔍 Detectadas confirmações pendentes:", confirmMatches);
-      // Modo de confirmação: aguardar usuário confirmar ou corrigir
-      for (const match of confirmMatches) {
-        await processPendingConfirmation(match[1].trim(), match[2].trim());
-      }
-    } else {
-      if (saveMatches.length > 0) console.log("💾 Detectados marcadores de salvamento:", saveMatches);
-      for (const match of saveMatches) {
-        await processSaveMarker(match[1].trim(), match[2].trim());
-      }
+    // ── Detectar e processar marcadores [SALVAR] ──
+    const saveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*([^\]]+)\]/g)];
+    console.log(`🔍 Resposta da IA (${reply.length} chars). Marcadores [SALVAR] encontrados: ${saveMatches.length}`);
+    if (saveMatches.length === 0 && isAuthenticated) {
+      console.warn("⚠️ ATENÇÃO: Nenhum marcador [SALVAR] encontrado na resposta da IA. Verifique o prompt.");
+      console.log("Trecho da resposta:", reply.substring(0, 300));
+    }
+    for (const match of saveMatches) {
+      console.log(`💾 Salvando → ID: ${match[1].trim()} | Valor: ${match[2].trim()}`);
+      await processSaveMarker(match[1].trim(), match[2].trim());
     }
 
     // Verificar se a coleta está completa
@@ -1068,19 +1063,8 @@ async function callOpenAI(userMsg) {
   userInput.focus();
 }
 
-// ═══════════════════════════════════════════════════
-// SISTEMA DE CONFIRMAÇÃO (dados suspeitos)
-// ═══════════════════════════════════════════════════
-let pendingConfirmation = null; // { id, value }
-
-async function processPendingConfirmation(idStr, answerText) {
-  const targetId = parseInt(idStr, 10);
-  if (isNaN(targetId)) return;
-  const match = clientFields.find(f => f.rowIndex === targetId);
-  if (match) {
-    pendingConfirmation = { id: targetId, value: answerText, field: match };
-  }
-}
+// Sistema de confirmação removido — IA salva direto sem validação intermediária
+let pendingConfirmation = null;
 
 // ═══════════════════════════════════════════════════
 // PROCESSAR MARCADORES [SALVAR]
@@ -1133,13 +1117,7 @@ function handleSend() {
     handleCodeInput(text);
   } else {
     appendMessage('user', text);
-    // Se havia uma confirmação pendente, passa o contexto para a IA saber da resposta do usuário
-    if (pendingConfirmation) {
-      const ctx = `O usuário respondeu sobre a confirmação do campo "${pendingConfirmation.field.question}": "${text}"`;
-      callOpenAI(ctx);
-    } else {
-      callOpenAI(text);
-    }
+    callOpenAI(text);
   }
 }
 
