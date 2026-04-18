@@ -516,20 +516,11 @@
 // ═══════════════════════════════════════════════════
 // CONFIGURAÇÃO
 // ═══════════════════════════════════════════════════
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const OPENAI_MODEL = "gpt-4o-mini"; // Mais barato e muito capaz
+// URL do nosso backend seguro na Vercel (a chave fica lá, nunca aqui)
+const OPENAI_API_URL = "/api/chat";
+const OPENAI_MODEL = "gpt-4o-mini";
 
-// A chave fica salva localmente no navegador (não vai para o GitHub)
-function getApiKey() {
-  let key = localStorage.getItem('openai_api_key');
-  if (!key) {
-    key = prompt('🔑 Cole sua chave da OpenAI para continuar (ela será salva só neste navegador):');
-    if (key) localStorage.setItem('openai_api_key', key.trim());
-  }
-  return key ? key.trim() : '';
-}
-
-// URL do Apps Script (Banco de Dados)
+// URL do Apps Script (Banco de Dados Google Sheets)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTdBCSKXIioVzBnu0c7tlqChaCetvO7Yg_cssjiAuEzkv9LhcxNsD_EheW7px8pk98UQ/exec";
 
 const CONSULTANT_EMAIL_DEFAULT = "";
@@ -756,8 +747,7 @@ async function callOpenAI(userMsg) {
     const res = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getApiKey()}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         model: OPENAI_MODEL,
