@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   try {
     let input = '';
     let voice = 'nova';
-    let model = 'tts-1';
+    let model = 'tts-1-hd';
 
     if (req.method === 'POST') {
       input = req.body.input;

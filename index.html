@@ -517,7 +517,12 @@ const progressLabel = document.getElementById('progressLabel');
 const progressPct = document.getElementById('progressPct');
 
 function scrollBottom() {
-  setTimeout(() => chatBox.scrollIntoView({ behavior: 'smooth', block: 'end' }), 100);
+  setTimeout(() => {
+    const wrap = document.querySelector('.chat-wrap');
+    if(wrap) {
+      wrap.scrollTo({ top: wrap.scrollHeight, behavior: 'smooth' });
+    }
+  }, 100);
 }
 
 function appendMessage(role, text) {
