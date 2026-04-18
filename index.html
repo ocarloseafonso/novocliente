@@ -839,7 +839,6 @@ userInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
 });
 userInput.addEventListener('input', () => {
-  stopAudio();
   userInput.style.height = 'auto';
   userInput.style.height = userInput.scrollHeight + 'px';
 });
@@ -953,6 +952,8 @@ async function speakText(text, onEnd) {
   let clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '');
   // Remover os comandos técnicos de salvamento
   clean = clean.replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '');
+  // Remover emojis que fazem a API de TTS hallucinar outros idiomas
+  clean = clean.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
   
   clean = clean.trim();
   if (!clean) { if (onEnd) onEnd(); return; }
