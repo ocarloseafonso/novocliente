@@ -556,9 +556,108 @@
       font-size: 14px;
     }
   }
+
+  /* ═══════════════════════════════════════════════════
+     SPLASH SCREEN — Tela de boas-vindas com início
+     ═══════════════════════════════════════════════════ */
+  .splash-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: #090306 radial-gradient(circle at top right, #380721 0%, transparent 50%), radial-gradient(circle at bottom left, #4a0d33 0%, transparent 50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 30px;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+  }
+  .splash-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .splash-logo {
+    width: auto;
+    max-width: 180px;
+    height: auto;
+    max-height: 60px;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 20px rgba(217, 32, 112, 0.3));
+  }
+  .splash-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 28px;
+    color: #f7e6c1;
+    font-style: italic;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.3;
+  }
+  .splash-subtitle {
+    font-size: 15px;
+    color: var(--muted);
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.5;
+  }
+  .splash-btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent-glow));
+    color: #fff;
+    border: none;
+    padding: 16px 48px;
+    border-radius: 50px;
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 8px 30px rgba(217, 32, 112, 0.4);
+    letter-spacing: 0.5px;
+  }
+  .splash-btn:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 12px 40px rgba(255, 76, 153, 0.5);
+  }
+  .splash-btn:active {
+    transform: translateY(0) scale(0.98);
+  }
+  .splash-hint {
+    font-size: 12px;
+    color: rgba(255,255,255,0.3);
+    margin-top: -10px;
+  }
+
+  @media (max-width: 640px) {
+    .splash-logo {
+      max-width: 140px;
+      max-height: 48px;
+    }
+    .splash-title {
+      font-size: 22px;
+      padding: 0 20px;
+    }
+    .splash-subtitle {
+      font-size: 14px;
+      padding: 0 30px;
+    }
+    .splash-btn {
+      padding: 14px 40px;
+      font-size: 16px;
+    }
+  }
 </style>
 </head>
 <body>
+
+<!-- Splash Screen -->
+<div class="splash-overlay" id="splashOverlay">
+  <img src="logo.png" alt="Logo" class="splash-logo">
+  <div class="splash-title">Formulário de<br>Novo Cliente</div>
+  <div class="splash-subtitle">Vou te ajudar a preencher o cadastro do seu negócio de forma rápida e fácil. Você pode digitar ou falar comigo! 🎤</div>
+  <button class="splash-btn" id="splashBtn" onclick="startApp()">Começar</button>
+  <div class="splash-hint">🔊 Ative o som para uma experiência completa</div>
+</div>
 
 <div class="app-container">
   <header>
@@ -1013,6 +1112,9 @@ function handleSend() {
   // ★ INTERROMPE a voz da assistente na hora que o usuário envia mensagem
   stopAudio();
 
+  // Limpar acumulador de voz ao enviar
+  voiceAccumulatedText = '';
+
   userInput.value = '';
   userInput.style.height = 'auto';
 
@@ -1040,9 +1142,10 @@ userInput.addEventListener('input', () => {
 });
 
 // ═══════════════════════════════════════════════════
-// Voice Recognition
+// Voice Recognition (sem duplicação)
 // ═══════════════════════════════════════════════════
 let shouldListen = false;
+let voiceAccumulatedText = ''; // Texto acumulado entre sessões de reconhecimento
 
 function setupVoice() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1053,7 +1156,7 @@ function setupVoice() {
 
   recognition = new SpeechRecognition();
   recognition.lang = 'pt-BR';
-  recognition.continuous = true;
+  recognition.continuous = false; // ← CORRIGIDO: false evita duplicação entre sessões
   recognition.interimResults = true;
 
   recognition.onstart = () => {
@@ -1065,17 +1168,25 @@ function setupVoice() {
   };
 
   recognition.onresult = (e) => {
-    let finalText = '';
-    let interimText = '';
+    let sessionFinal = '';
+    let sessionInterim = '';
     for (let i = 0; i < e.results.length; i++) {
       const result = e.results[i];
       if (result.isFinal) {
-        finalText += result[0].transcript;
+        sessionFinal += result[0].transcript;
       } else {
-        interimText += result[0].transcript;
+        sessionInterim += result[0].transcript;
       }
     }
-    userInput.value = finalText + interimText;
+    // Combinar texto acumulado de sessões anteriores + sessão atual
+    if (sessionFinal) {
+      // Quando temos resultado final, acumular para próxima sessão
+      voiceAccumulatedText += sessionFinal;
+      userInput.value = voiceAccumulatedText;
+    } else {
+      // Resultados parciais: mostrar acumulado + interim
+      userInput.value = voiceAccumulatedText + sessionInterim;
+    }
     userInput.style.height = 'auto';
     userInput.style.height = userInput.scrollHeight + 'px';
   };
@@ -1086,7 +1197,7 @@ function setupVoice() {
     if (shouldListen) {
       setTimeout(() => {
         try { recognition.start(); } catch(e) { /* ignora */ }
-      }, 200);
+      }, 300);
       return;
     }
     document.getElementById('voiceGroup').classList.remove('listening');
@@ -1114,9 +1225,11 @@ voiceBtn.addEventListener('click', (e) => {
   stopAudio();
   if (shouldListen) {
     shouldListen = false;
+    voiceAccumulatedText = ''; // Limpar acumulador ao desligar mic
     recognition.stop();
   } else {
     shouldListen = true;
+    voiceAccumulatedText = ''; // Limpar ao iniciar nova sessão de voz
     try { recognition.start(); } catch(err) { console.warn('Mic:', err); }
   }
 });
@@ -1353,24 +1466,34 @@ async function sendEmail() {
 }
 
 // ═══════════════════════════════════════════════════
-// INIT
+// SPLASH SCREEN & INIT
 // ═══════════════════════════════════════════════════
+function startApp() {
+  // Desbloquear áudio com o clique do botão "Começar"
+  audioUnlocked = true;
+  console.log('✅ Áudio desbloqueado pelo botão Começar');
+  
+  // Esconder splash com animação suave
+  document.getElementById('splashOverlay').classList.add('hidden');
+  
+  // Mostrar mensagem de boas-vindas
+  const greeting = 'Olá! Eu sou a assistente virtual da C.E. Afonso.\n\nSou responsável por realizar o seu cadastro aqui na empresa. 😊\n\nFique à vontade para digitar ou usar o microfone para falar comigo!\n\nPara começar, por favor me informe o seu **código de acesso**.';
+  appendMessage('bot', greeting);
+  
+  // Falar a saudação — agora IMEDIATAMENTE pois o áudio já está desbloqueado
+  // e o prefetch provavelmente já terminou (foi iniciado no carregamento da página)
+  speakText(GREETING_TTS_TEXT);
+  
+  userInput.focus();
+}
+
 async function init() {
   setupVoice();
   setProgress(0, 'Aguardando código...');
 
   // Pré-carregar áudio da saudação em background (aquece Vercel + baixa áudio antecipadamente)
+  // Quando o usuário clicar em "Começar", o áudio já estará no cache
   prefetchGreetingAudio();
-
-  // Mensagem inicial
-  const greeting = 'Olá! Eu sou a assistente virtual da C.E. Afonso.\n\nSou responsável por realizar o seu cadastro aqui na empresa. 😊\n\nFique à vontade para digitar ou usar o microfone para falar comigo!\n\nPara começar, por favor me informe o seu **código de acesso**.';
-  appendMessage('bot', greeting);
-  
-  // Falar a saudação (será reproduzida do cache se o prefetch terminou,
-  // ou ficará pendente até o primeiro clique do usuário)
-  speakText(GREETING_TTS_TEXT);
-
-  userInput.focus();
 }
 
 init();
