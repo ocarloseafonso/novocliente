@@ -516,10 +516,20 @@
 // ═══════════════════════════════════════════════════
 // CONFIGURAÇÃO
 // ═══════════════════════════════════════════════════
-const GEMINI_API_KEY = "AIzaSyAYKrASX8vaUn6Ag03lJxe3Ygq-sSrtE5w";
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_MODEL = "gpt-4o-mini"; // Mais barato e muito capaz
 
-// ⚠️ COLE AQUI a URL do Apps Script após publicação como Web App
+// A chave fica salva localmente no navegador (não vai para o GitHub)
+function getApiKey() {
+  let key = localStorage.getItem('openai_api_key');
+  if (!key) {
+    key = prompt('🔑 Cole sua chave da OpenAI para continuar (ela será salva só neste navegador):');
+    if (key) localStorage.setItem('openai_api_key', key.trim());
+  }
+  return key ? key.trim() : '';
+}
+
+// URL do Apps Script (Banco de Dados)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTdBCSKXIioVzBnu0c7tlqChaCetvO7Yg_cssjiAuEzkv9LhcxNsD_EheW7px8pk98UQ/exec";
 
 const CONSULTANT_EMAIL_DEFAULT = "";
@@ -715,19 +725,20 @@ async function handleCodeInput(code) {
 
   setProgress(pct, answered > 0 ? 'Continuando cadastro...' : 'Iniciando cadastro...');
 
-  // Enviar contexto para o Gemini iniciar a conversa
+  // Iniciar conversa com a IA
   const greeting = answered > 0
     ? `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Já respondi algumas perguntas antes. Podemos continuar de onde paramos?`
     : `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Quero começar o cadastro do meu negócio no Google Meu Negócio.`;
 
-  await callGemini(greeting);
+  await callOpenAI(greeting);
 }
 
 // ═══════════════════════════════════════════════════
-// GEMINI API
+// OPENAI API (gpt-4o-mini)
 // ═══════════════════════════════════════════════════
-async function callGemini(userMsg) {
-  conversationHistory.push({ role: 'user', parts: [{ text: userMsg }] });
+async function callOpenAI(userMsg) {
+  // Formato OpenAI: { role: 'user'|'assistant', content: '...' }
+  conversationHistory.push({ role: 'user', content: userMsg });
 
   showTyping();
   isWaiting = true;
@@ -737,35 +748,40 @@ async function callGemini(userMsg) {
   try {
     const systemPrompt = buildSystemPrompt(currentClient, formQuestions, clientFields);
 
-    const payload = {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: conversationHistory,
-      generationConfig: {
-        temperature: 0.85,
-        maxOutputTokens: 800
-      }
-    };
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...conversationHistory
+    ];
 
-    const res = await fetch(GEMINI_API_URL, {
+    const res = await fetch(OPENAI_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getApiKey()}`
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: messages,
+        temperature: 0.85,
+        max_tokens: 800
+      })
     });
 
-    if (!res.ok) throw new Error(`API Error: ${res.status}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(`API Error ${res.status}: ${JSON.stringify(errData)}`);
+    }
 
     const data = await res.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Desculpe, não entendi. Pode repetir?';
+    const reply = data.choices?.[0]?.message?.content || 'Desculpe, não entendi. Pode repetir?';
 
-    conversationHistory.push({ role: 'model', parts: [{ text: reply }] });
+    conversationHistory.push({ role: 'assistant', content: reply });
     removeTyping();
 
     // Processar marcadores de salvamento [SALVAR|pergunta|resposta]
     const saveMatches = reply.matchAll(/\[SALVAR\|([^|]+)\|([^\]]+)\]/g);
     for (const match of saveMatches) {
-      const questionText = match[1].trim();
-      const answerText = match[2].trim();
-      await processSaveMarker(questionText, answerText);
+      await processSaveMarker(match[1].trim(), match[2].trim());
     }
 
     // Verificar se a coleta está completa
@@ -773,7 +789,7 @@ async function callGemini(userMsg) {
       const cleanReply = reply.replace(/COLETA_COMPLETA/g, '').replace(/\[SALVAR\|[^\]]*\]/g, '').trim() ||
         '✅ Perfeito! Todas as informações foram coletadas. Vou abrir um resumo para revisão.';
       appendMessage('bot', cleanReply);
-      speakText(cleanReply.replace(/\[SALVAR\|[^\]]*\]/g, ''));
+      speakText(cleanReply);
       setProgress(100, 'Concluído!');
       setTimeout(() => openModal(), 1500);
       return;
@@ -788,9 +804,7 @@ async function callGemini(userMsg) {
     setProgress(pct, topics[Math.min(topicIdx, topics.length - 1)]);
 
     appendMessage('bot', reply);
-    // Falar (limpar marcadores)
-    const spokenText = reply.replace(/\[SALVAR\|[^\]]*\]/g, '').trim();
-    speakText(spokenText);
+    speakText(reply.replace(/\[SALVAR\|[^\]]*\]/g, '').trim());
 
   } catch (err) {
     removeTyping();
@@ -857,7 +871,7 @@ function handleSend() {
     handleCodeInput(text);
   } else {
     appendMessage('user', text);
-    callGemini(text);
+    callOpenAI(text);
   }
 }
 
