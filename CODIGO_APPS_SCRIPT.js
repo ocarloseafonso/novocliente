@@ -1,16 +1,13 @@
 // ═══════════════════════════════════════════════════════════
 // APPS SCRIPT — Cole este código inteiro no Editor de Scripts
 // da sua planilha (Extensões > Apps Script).
-// Depois publique como Web App (Deploy > New deployment > Web app)
-// Execute as: Me  |  Who has access: Anyone
 // ═══════════════════════════════════════════════════════════
 
 const SPREADSHEET_ID = '1FmJy-gHRMpF4thwWotX-tFQUoUGJ4yCbd4eIsjnBlVg';
 
 // ── Helpers ──
-function getSheet(name) {
-  return SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
-}
+function getSs() { return SpreadsheetApp.openById(SPREADSHEET_ID); }
+function getSheet(name) { return getSs().getSheetByName(name); }
 
 function jsonResponse(obj) {
   return ContentService
@@ -18,274 +15,360 @@ function jsonResponse(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// ── CORS-friendly: GET e POST ──
+// Conversão segura → impede que "undefined" apareça como texto na planilha
+function safeStr(val) {
+  if (val === undefined || val === null) return '';
+  return String(val);
+}
+
+// Localiza cabeçalhos dinamicamente usando aliases (para aba Painel)
+function getTableMap(sheet, colsConfig) {
+  const data = sheet.getDataRange().getValues();
+  let headerRow = -1;
+  let mapping = {};
+  const limit = Math.min(5, data.length);
+
+  for (let r = 0; r < limit; r++) {
+    let matches = 0;
+    let tempMap = {};
+    for (let c = 0; c < data[r].length; c++) {
+      let val = safeStr(data[r][c]).toLowerCase().trim();
+      val = val.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      Object.keys(colsConfig).forEach(key => {
+        const aliases = colsConfig[key];
+        if (tempMap[key] === undefined) {
+          if (aliases.some(alias => val.includes(alias))) {
+            tempMap[key] = c;
+            matches++;
+          }
+        }
+      });
+    }
+
+    const needed = Object.keys(colsConfig).length;
+    if (matches >= Math.min(2, needed) || (needed === 1 && matches === 1)) {
+      headerRow = r;
+      mapping = tempMap;
+      break;
+    }
+  }
+  return { headerRow, mapping, data };
+}
+
+// ── CORS-friendly ──
 function doGet(e)  { return handleRequest(e); }
 function doPost(e) { return handleRequest(e); }
 
 function handleRequest(e) {
   try {
-    // Prioriza parâmetros GET (e.parameter) — evita bloqueios de CORS do browser
     let params = e.parameter || {};
-
-    // Fallback para POST body se não tiver action no GET
     if (!params.action && e.postData && e.postData.contents) {
       params = JSON.parse(e.postData.contents);
     }
-
     const action = params.action;
-
     switch (action) {
-      case 'checkCode':
-        return checkCode(params.codigo);
-      case 'getClientData':
-        return getClientData(params.codigo);
-      case 'createClientTab':
-        return createClientTab(params.codigo);
-      case 'saveAnswer':
-        return saveAnswer(params.codigo, Number(params.rowIndex), params.resposta);
-      case 'getFormQuestions':
-        return getFormQuestions();
-      default:
-        return jsonResponse({ error: 'Ação desconhecida: ' + action });
+      case 'checkCode':     return checkCode(params.codigo);
+      case 'getClientData': return getClientData(params.codigo);
+      case 'createClientTab': return createClientTab(params.codigo);
+      case 'saveAnswer':    return saveAnswer(params.codigo, Number(params.rowIndex), params.resposta);
+      default: return jsonResponse({ error: 'Ação desconhecida: ' + action });
     }
   } catch (err) {
-    return jsonResponse({ error: err.toString() });
+    return jsonResponse({ error: err.toString(), stack: err.stack });
   }
 }
 
-// ═══════════════════════════════════════════════════
-// 1. VERIFICAR CÓDIGO — Busca na aba "Painel"
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// 1. VERIFICAR CÓDIGO (Aba Painel)
+// ═══════════════════════════════════════════════════════════
 function checkCode(codigo) {
   const sheet = getSheet('Painel');
-  const data = sheet.getDataRange().getValues();
-  
-  // Cabeçalhos na linha 1: Nome (A), Código (B), Status (C)
-  for (let i = 1; i < data.length; i++) {
-    const nome   = String(data[i][0]).trim();
-    const cod    = String(data[i][1]).trim();
-    const status = String(data[i][2]).trim();
+  if (!sheet) return jsonResponse({ error: 'Aba "Painel" não encontrada.' });
 
-    if (cod === String(codigo).trim()) {
+  const { headerRow, mapping, data } = getTableMap(sheet, {
+    'Nome': ['nome', 'cliente'],
+    'Código': ['codigo', 'acesso'],
+    'Status': ['status', 'estado']
+  });
+
+  if (headerRow === -1 || mapping['Código'] === undefined) {
+    return jsonResponse({ error: 'Cabeçalhos do Painel não encontrados.' });
+  }
+
+  const cNome = mapping['Nome'] !== undefined ? mapping['Nome'] : 0;
+  const cCod  = mapping['Código'];
+  const cStat = mapping['Status'] !== undefined ? mapping['Status'] : 2;
+
+  for (let i = headerRow + 1; i < data.length; i++) {
+    if (safeStr(data[i][cCod]).trim() === String(codigo).trim()) {
       return jsonResponse({
         found: true,
-        nome: nome,
-        codigo: cod,
-        status: status,
-        row: i + 1 // linha real na planilha (1-indexed)
+        nome:   safeStr(data[i][cNome]).trim(),
+        codigo: safeStr(data[i][cCod]).trim(),
+        status: safeStr(data[i][cStat]).trim()
       });
     }
   }
-
   return jsonResponse({ found: false });
 }
 
-// ═══════════════════════════════════════════════════
-// 2. BUSCAR AS PERGUNTAS DO FORMULÁRIO
-// ═══════════════════════════════════════════════════
-function getFormQuestions() {
-  const sheet = getSheet('Formulário');
-  const data = sheet.getDataRange().getValues();
-  const questions = [];
+// ═══════════════════════════════════════════════════════════
+// FUNÇÃO CENTRAL: Detecta colunas da aba Formulário
+// Retorna { headerRow, qCol, obsCol } com segurança total
+// ═══════════════════════════════════════════════════════════
+function detectFormularioColumns(formularioSheet) {
+  const fData = formularioSheet.getDataRange().getValues();
 
-  // Coluna A = Formulário  |  Coluna B = Informações
-  // Linha 1 é cabeçalho, pula
-  for (let i = 1; i < data.length; i++) {
-    const q = String(data[i][0]).trim();
-    if (q) {
-      questions.push({ rowIndex: i + 1, question: q });
+  let headerRow = -1;
+  let qCol = -1;    // Coluna com perguntas ("Formulário" ou "Pergunta")
+  let obsCol = -1;  // Coluna com observações ("Observações")
+
+  for (let r = 0; r < Math.min(5, fData.length); r++) {
+    for (let c = 0; c < fData[r].length; c++) {
+      const val = safeStr(fData[r][c]).toLowerCase().trim()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      // Procura a coluna de perguntas
+      if (qCol === -1) {
+        if (val === 'formulario' || val === 'pergunta' || val === 'perguntas' ||
+            val === 'questao'    || val === 'questoes') {
+          qCol = c;
+          headerRow = r;
+        }
+      }
+
+      // Procura a coluna de observações
+      if (obsCol === -1) {
+        if (val === 'observacoes' || val === 'observacao' || val === 'obs' ||
+            val === 'notas'       || val === 'nota') {
+          obsCol = c;
+          if (headerRow === -1) headerRow = r;
+        }
+      }
+    }
+    // Se já achou a de perguntas, podemos parar a busca de linhas
+    if (qCol >= 0) break;
+  }
+
+  // Fallback seguro: se nenhum header achado, assume col 0 = perguntas
+  if (headerRow === -1) { headerRow = 0; qCol = 0; }
+  if (qCol === -1) { qCol = 0; }
+
+  return { fData, headerRow, qCol, obsCol };
+}
+
+// ═══════════════════════════════════════════════════════════
+// SINCRONIZAR PERGUNTAS: Formulário → Aba do Cliente
+// ★ Conserta abas corrompidas e preserva respostas existentes
+// ═══════════════════════════════════════════════════════════
+function syncQuestionsFromFormulario(clientSheet, formularioSheet) {
+  const { fData, headerRow, qCol } = detectFormularioColumns(formularioSheet);
+
+  // Extrair perguntas válidas do Formulário
+  const questions = [];
+  for (let i = headerRow + 1; i < fData.length; i++) {
+    const raw = (qCol < fData[i].length) ? fData[i][qCol] : null;
+    const q = safeStr(raw).trim();
+    if (q && q !== 'undefined') {
+      questions.push(q);
     }
   }
 
-  return jsonResponse({ questions: questions });
+  // Ler respostas já existentes na aba do cliente (para preservá-las)
+  const existingAnswers = {};
+  if (clientSheet.getLastRow() > 1) {
+    const existingData = clientSheet.getDataRange().getValues();
+    for (let i = 1; i < existingData.length; i++) {
+      const eq = safeStr(existingData[i][0]).trim();
+      const ea = safeStr(existingData[i][1]).trim();
+      if (eq && ea && eq !== 'undefined') {
+        existingAnswers[eq] = ea;
+      }
+    }
+  }
+
+  // Escrever cabeçalhos da aba do cliente
+  clientSheet.getRange(1, 1).setValue('Pergunta')
+    .setFontWeight('bold').setBackground('#4f8eff').setFontColor('#ffffff');
+  clientSheet.getRange(1, 2).setValue('Informações')
+    .setFontWeight('bold').setBackground('#4f8eff').setFontColor('#ffffff');
+
+  // Escrever perguntas + preservar respostas que já existiam
+  for (let i = 0; i < questions.length; i++) {
+    const row = i + 2;
+    clientSheet.getRange(row, 1).setValue(questions[i]);
+    clientSheet.getRange(row, 2).setValue(existingAnswers[questions[i]] || '');
+  }
+
+  // Limpar linhas extras (dados antigos/corrompidos de tentativas anteriores)
+  const lastRow = clientSheet.getLastRow();
+  const expectedLastRow = questions.length + 1;
+  if (lastRow > expectedLastRow) {
+    clientSheet.getRange(expectedLastRow + 1, 1, lastRow - expectedLastRow, 2).clearContent();
+  }
+
+  return questions.length;
 }
 
-// ═══════════════════════════════════════════════════
-// 3. CRIAR ABA DO CLIENTE
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// 2. CRIAR (ou REPARAR) ABA DO CLIENTE
+// ★ Agora SEMPRE sincroniza — não importa se a aba já existia
+// ═══════════════════════════════════════════════════════════
 function createClientTab(codigo) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSs();
   const painel = ss.getSheetByName('Painel');
   const formulario = ss.getSheetByName('Formulário');
+  if (!painel || !formulario) return jsonResponse({ error: 'Abas principais não encontradas.' });
 
-  // Encontrar a linha do cliente no Painel
-  const painelData = painel.getDataRange().getValues();
-  let clientRow = -1;
-  let clientName = '';
-  
-  for (let i = 1; i < painelData.length; i++) {
-    if (String(painelData[i][1]).trim() === String(codigo).trim()) {
-      clientRow = i + 1;
-      clientName = String(painelData[i][0]).trim();
+  // Localizar cliente no Painel
+  const pMap = getTableMap(painel, {
+    'Nome': ['nome'], 'Código': ['codigo'], 'Status': ['status']
+  });
+
+  let clientName = '', pRow = -1;
+  const cCodPainel = pMap.mapping['Código'];
+  if (cCodPainel === undefined) return jsonResponse({ error: 'Coluna Código não achada no Painel.' });
+
+  for (let i = pMap.headerRow + 1; i < pMap.data.length; i++) {
+    if (safeStr(pMap.data[i][cCodPainel]).trim() === String(codigo).trim()) {
+      clientName = safeStr(pMap.data[i][pMap.mapping['Nome']]).trim();
+      pRow = i + 1;
       break;
     }
   }
+  if (!clientName) return jsonResponse({ error: 'Cliente não localizado no Painel.' });
 
-  if (clientRow === -1) {
-    return jsonResponse({ error: 'Código não encontrado no Painel.' });
-  }
-
-  // Nome da aba = nome do cliente
-  const tabName = clientName;
-  let clientSheet = ss.getSheetByName(tabName);
+  // Criar aba ou reusar existente
+  let clientSheet = ss.getSheetByName(clientName);
+  let isNew = false;
 
   if (!clientSheet) {
-    // Copiar estrutura do Formulário
-    const formData = formulario.getDataRange().getValues();
-    clientSheet = ss.insertSheet(tabName);
+    clientSheet = ss.insertSheet(clientName);
+    isNew = true;
+  }
 
-    // Escrever cabeçalhos e perguntas
-    for (let i = 0; i < formData.length; i++) {
-      clientSheet.getRange(i + 1, 1).setValue(formData[i][0]); // Coluna A: Perguntas
-      clientSheet.getRange(i + 1, 2).setValue(formData[i][1]); // Coluna B: (vazio ou cabeçalho)
-    }
+  // ★ SEMPRE sincroniza as perguntas do Formulário → aba do cliente
+  // Isso conserta automaticamente abas que foram criadas com dados errados
+  const totalQ = syncQuestionsFromFormulario(clientSheet, formulario);
 
-    // Formatar a aba do cliente
-    clientSheet.setColumnWidth(1, 300);
-    clientSheet.setColumnWidth(2, 400);
-    
-    // Cabeçalho em negrito
-    clientSheet.getRange(1, 1, 1, 2).setFontWeight('bold')
-      .setBackground('#4f8eff').setFontColor('#ffffff');
+  clientSheet.setColumnWidth(1, 450);
+  clientSheet.setColumnWidth(2, 450);
+  clientSheet.setFrozenRows(1);
 
-    // Criar link clicável no Painel (coluna A = Nome vira hyperlink)
-    const sheetUrl = ss.getUrl() + '#gid=' + clientSheet.getSheetId();
+  // Link e status no Painel (só para abas novas)
+  if (isNew && pMap.mapping['Nome'] !== undefined) {
     const richText = SpreadsheetApp.newRichTextValue()
       .setText(clientName)
-      .setLinkUrl(sheetUrl)
+      .setLinkUrl(ss.getUrl() + '#gid=' + clientSheet.getSheetId())
       .build();
-    painel.getRange(clientRow, 1).setRichTextValue(richText);
-
-    // Atualizar status para "Em andamento"
-    painel.getRange(clientRow, 3).setValue('Em andamento');
+    painel.getRange(pRow, pMap.mapping['Nome'] + 1).setRichTextValue(richText);
+  }
+  if (isNew && pMap.mapping['Status'] !== undefined) {
+    painel.getRange(pRow, pMap.mapping['Status'] + 1).setValue('Em andamento');
   }
 
-  return jsonResponse({
-    success: true,
-    tabName: tabName,
-    tabId: clientSheet.getSheetId()
-  });
+  return jsonResponse({ success: true, questionsCount: totalQ });
 }
 
-// ═══════════════════════════════════════════════════
-// 4. BUSCAR DADOS DO CLIENTE (aba individual)
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// 3. BUSCAR DADOS DO CLIENTE
+// ═══════════════════════════════════════════════════════════
 function getClientData(codigo) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSs();
   const painel = ss.getSheetByName('Painel');
-  const painelData = painel.getDataRange().getValues();
+  const pMap = getTableMap(painel, { 'Nome': ['nome'], 'Código': ['codigo'] });
 
   let clientName = '';
-  for (let i = 1; i < painelData.length; i++) {
-    if (String(painelData[i][1]).trim() === String(codigo).trim()) {
-      clientName = String(painelData[i][0]).trim();
-      break;
-    }
-  }
+  const cCodPainel = pMap.mapping['Código'];
 
-  if (!clientName) return jsonResponse({ error: 'Código não encontrado.' });
-
-  const clientSheet = ss.getSheetByName(clientName);
-  if (!clientSheet) {
-    return jsonResponse({ tabExists: false, nome: clientName });
-  }
-
-  // Carregar aba Formulário para pegar as observações também (para funcionar inclusive com abas de clientes já criadas)
-  const formSheet = ss.getSheetByName('Formulário');
-  let formObsMap = {};
-  if (formSheet) {
-    const formData = formSheet.getDataRange().getValues();
-    const formHeader = formData[0] || [];
-    let obsColIndex = -1;
-    // Tenta encontrar a coluna de observações pelo cabeçalho
-    for(let c=0; c<formHeader.length; c++) {
-      const headerText = String(formHeader[c]).toLowerCase();
-      if(headerText.includes('observaç') || headerText.includes('observac')) {
-        obsColIndex = c;
+  if (cCodPainel !== undefined) {
+    for (let i = pMap.headerRow + 1; i < pMap.data.length; i++) {
+      if (safeStr(pMap.data[i][cCodPainel]).trim() === String(codigo).trim()) {
+        clientName = safeStr(pMap.data[i][pMap.mapping['Nome']]).trim();
         break;
       }
     }
-    // Fallback para a coluna C (índice 2) se não achar pelo nome, mas houver mais de 2 colunas
-    if(obsColIndex === -1 && formData[0].length > 2) {
-      obsColIndex = 2;
-    }
+  }
+  if (!clientName) return jsonResponse({ error: 'Código inválido.' });
 
-    if(obsColIndex !== -1) {
-      for(let i=1; i<formData.length; i++) {
-        const q = String(formData[i][0]).trim();
-        const obs = String(formData[i][obsColIndex]).trim();
-        if(q) formObsMap[q] = obs;
+  const clientSheet = ss.getSheetByName(clientName);
+  const formSheet   = ss.getSheetByName('Formulário');
+
+  if (!clientSheet) return jsonResponse({ tabExists: false });
+
+  // ── Carregar observações da aba Formulário central ──
+  let obsMap = {};
+  if (formSheet) {
+    const { fData, headerRow: fHR, qCol: fQC, obsCol: fOC } = detectFormularioColumns(formSheet);
+
+    if (fQC >= 0 && fOC >= 0) {
+      for (let i = fHR + 1; i < fData.length; i++) {
+        const q   = safeStr(fData[i][fQC]).trim();
+        const obs = safeStr(fData[i][fOC]).trim();
+        if (q && q !== 'undefined') obsMap[q] = obs;
       }
     }
   }
 
-  const data = clientSheet.getDataRange().getValues();
+  // ── Carregar perguntas e respostas da aba do cliente ──
+  // Estrutura conhecida: col A = Pergunta, col B = Informações, header na linha 1
+  const cData = clientSheet.getDataRange().getValues();
   const fields = [];
 
-  // Linha 1 é cabeçalho, começa em 2
-  for (let i = 1; i < data.length; i++) {
-    const question = String(data[i][0]).trim();
-    const answer   = String(data[i][1]).trim();
-    if (question) {
+  for (let i = 1; i < cData.length; i++) {
+    const q = safeStr(cData[i][0]).trim();  // Coluna A = pergunta
+    const a = safeStr(cData[i][1]).trim();  // Coluna B = informação
+    if (q && q !== 'undefined') {
       fields.push({
-        rowIndex: i + 1,
-        question: question,
-        answer: answer || '',
-        observacao: formObsMap[question] || ''
+        rowIndex:   i + 1,   // Linha real na planilha (1-indexed)
+        question:   q,
+        answer:     a,
+        observacao: obsMap[q] || ''
       });
     }
   }
 
-  return jsonResponse({
-    tabExists: true,
-    nome: clientName,
-    fields: fields
-  });
+  return jsonResponse({ tabExists: true, nome: clientName, fields: fields });
 }
 
-// ═══════════════════════════════════════════════════
-// 5. SALVAR RESPOSTA NA ABA DO CLIENTE
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// 4. SALVAR RESPOSTA
+// ═══════════════════════════════════════════════════════════
 function saveAnswer(codigo, rowIndex, resposta) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSs();
   const painel = ss.getSheetByName('Painel');
-  const painelData = painel.getDataRange().getValues();
+  const pMap = getTableMap(painel, { 'Nome': ['nome'], 'Código': ['codigo'], 'Status': ['status'] });
 
-  let clientName = '';
-  let painelRow = -1;
-  for (let i = 1; i < painelData.length; i++) {
-    if (String(painelData[i][1]).trim() === String(codigo).trim()) {
-      clientName = String(painelData[i][0]).trim();
-      painelRow = i + 1;
-      break;
+  let clientName = '', pRow = -1;
+  const cCodPainel = pMap.mapping['Código'];
+  if (cCodPainel !== undefined) {
+    for (let i = pMap.headerRow + 1; i < pMap.data.length; i++) {
+      if (safeStr(pMap.data[i][cCodPainel]).trim() === String(codigo).trim()) {
+        clientName = safeStr(pMap.data[i][pMap.mapping['Nome']]).trim();
+        pRow = i + 1;
+        break;
+      }
     }
   }
-
-  if (!clientName) return jsonResponse({ error: 'Código não encontrado.' });
 
   const clientSheet = ss.getSheetByName(clientName);
   if (!clientSheet) return jsonResponse({ error: 'Aba do cliente não encontrada.' });
 
-  // Salvar resposta na coluna B da linha indicada
+  // Coluna B (col 2 no getRange, 1-indexed) = Informações — sempre fixa
   clientSheet.getRange(rowIndex, 2).setValue(resposta);
 
-  // Verificar se todas as perguntas foram respondidas
-  const data = clientSheet.getDataRange().getValues();
+  // Re-checar se TODAS as perguntas foram respondidas
+  const updatedData = clientSheet.getDataRange().getValues();
   let allDone = true;
-  for (let i = 1; i < data.length; i++) {
-    const q = String(data[i][0]).trim();
-    const a = String(data[i][1]).trim();
-    if (q && !a) {
-      allDone = false;
-      break;
-    }
+  for (let i = 1; i < updatedData.length; i++) {
+    const q = safeStr(updatedData[i][0]).trim();
+    const a = safeStr(updatedData[i][1]).trim();
+    if (q && q !== 'undefined' && !a) { allDone = false; break; }
   }
 
-  // Atualizar status no Painel
-  if (allDone) {
-    painel.getRange(painelRow, 3).setValue('Completo');
-  } else {
-    painel.getRange(painelRow, 3).setValue('Em andamento');
+  if (allDone && pMap.mapping['Status'] !== undefined) {
+    painel.getRange(pRow, pMap.mapping['Status'] + 1).setValue('Completo');
   }
 
   return jsonResponse({ success: true, allDone: allDone });

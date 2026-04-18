@@ -719,7 +719,7 @@ const OPENAI_TTS_URL = "/api/tts";
 const OPENAI_MODEL = "gpt-4o-mini";
 
 // URL do Apps Script (Banco de Dados Google Sheets)
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTdBCSKXIioVzBnu0c7tlqChaCetvO7Yg_cssjiAuEzkv9LhcxNsD_EheW7px8pk98UQ/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxleLcPyzOltI6NkgAfdzth1RuC0dtxlzT8c-iBKV2uVjM89WpPX7SQ9oHwsP3-rVNjMA/exec";
 
 const CONSULTANT_EMAIL_DEFAULT = "";
 
@@ -760,7 +760,7 @@ function buildSystemPrompt(clientData, questions, fieldsState) {
     .join('\n');
 
   const pendingStr = fieldsState
-    .filter(f => !f.answer)
+    .filter(f => !f.answer && f.question !== 'undefined')
     .map(f => {
       let line = `ID: ${f.rowIndex} | Pergunta: ${f.question}`;
       if (f.observacao) line += ` | NOTA PARA A IA: ${f.observacao}`;
@@ -840,8 +840,12 @@ function appendMessage(role, text) {
 
   const bubble = document.createElement('div');
   bubble.className = `bubble ${role}`;
-  // Clean [SALVAR|...|...] markers before showing
-  const cleanText = text.replace(/\[SALVAR\|[^\]]*\]/g, '').trim();
+  // Clean ALL markers before showing in chat
+  const cleanText = text
+    .replace(/\[SALVAR\|[^\]]*\]/g, '')
+    .replace(/\[CONFIRMAR\|[^\]]*\]/g, '')
+    .replace(/COLETA_COMPLETA/g, '')
+    .trim();
   bubble.innerHTML = cleanText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
 
   wrap.appendChild(avatar);
@@ -882,6 +886,7 @@ function setProgress(pct, label) {
 // ═══════════════════════════════════════════════════
 async function callAppsScript(params) {
   try {
+    console.log("📡 Chamando Apps Script:", params);
     const url = new URL(APPS_SCRIPT_URL);
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
     const res = await fetch(url.toString(), {
@@ -889,7 +894,9 @@ async function callAppsScript(params) {
       redirect: 'follow'
     });
     const text = await res.text();
-    return JSON.parse(text);
+    const json = JSON.parse(text);
+    console.log("📩 Resposta Apps Script:", json);
+    return json;
   } catch (err) {
     console.error('Apps Script error:', err);
     return { error: err.toString() };
@@ -1002,22 +1009,26 @@ async function callOpenAI(userMsg) {
       throw new Error(`API Error ${res.status}: ${JSON.stringify(errData)}`);
     }
 
-    const data = await res.json();
-    const reply = data.choices?.[0]?.message?.content || 'Desculpe, não entendi. Pode repetir?';
+    const resData = await res.json();
+    console.log("📥 Resposta da IA:", resData);
+    const reply = resData.choices?.[0]?.message?.content || 'Desculpe, não entendi. Pode repetir?';
 
     conversationHistory.push({ role: 'assistant', content: reply });
     removeTyping();
 
     // Processar marcadores de salvamento e confirmação
-    const confirmMatches = [...reply.matchAll(/\[CONFIRMAR\|([^|]+)\|([^\]]+)\]/g)];
-    const saveMatches = [...reply.matchAll(/\[SALVAR\|([^|]+)\|([^\]]+)\]/g)];
+    // Regex melhorada: suporta espaços extras e caracteres variados no valor
+    const confirmMatches = [...reply.matchAll(/\[CONFIRMAR\s*\|\s*([^|\]]+)\s*\|\s*([^\]]+)\]/g)];
+    const saveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*([^|\]]+)\s*\|\s*([^\]]+)\]/g)];
     
     if (confirmMatches.length > 0) {
+      console.log("🔍 Detectadas confirmações pendentes:", confirmMatches);
       // Modo de confirmação: aguardar usuário confirmar ou corrigir
       for (const match of confirmMatches) {
         await processPendingConfirmation(match[1].trim(), match[2].trim());
       }
     } else {
+      if (saveMatches.length > 0) console.log("💾 Detectados marcadores de salvamento:", saveMatches);
       for (const match of saveMatches) {
         await processSaveMarker(match[1].trim(), match[2].trim());
       }
@@ -1043,7 +1054,7 @@ async function callOpenAI(userMsg) {
     setProgress(pct, topics[Math.min(topicIdx, topics.length - 1)]);
 
     appendMessage('bot', reply);
-    speakText(reply.replace(/\[SALVAR\|[^\]]*\]/g, '').trim());
+    speakText(reply.replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '').replace(/COLETA_COMPLETA/g, '').trim());
 
   } catch (err) {
     removeTyping();
