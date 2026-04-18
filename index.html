@@ -39,6 +39,8 @@
   .app-container {
     width: 100%;
     max-width: 820px;
+    height: calc(100vh - 80px);
+    max-height: 800px;
     background: var(--surface);
     backdrop-filter: blur(20px);
     border: 1px solid var(--border);
@@ -116,6 +118,22 @@
     display: flex;
     flex-direction: column;
     gap: 0;
+    overflow-y: auto;
+  }
+
+  /* Custom Scrollbar for chat-wrap */
+  .chat-wrap::-webkit-scrollbar {
+    width: 8px;
+  }
+  .chat-wrap::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .chat-wrap::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+  }
+  .chat-wrap::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
   }
 
   #chatBox {
@@ -935,17 +953,29 @@ async function speakText(text, onEnd) {
   if (!clean) { if (onEnd) onEnd(); return; }
 
   try {
-    // Usar requisição GET direta no src do Audio aproveitando o Stream do navegador.
-    // Isso tira os 1-2 segundos de delay do Fetch Blob (carregamento instantâneo).
-    const qs = new URLSearchParams({ input: clean, voice: 'nova' }).toString();
-    const url = `${OPENAI_TTS_URL}?${qs}`;
+    // Voltando para o Fetch + Blob, pois o streaming da tag Audio às vezes engasga no primeiro chunk (lendo correndo/pulando palavras).
+    // O pequeno delay agora é ocultado pela mensagem imediata do lado de fora.
+    const res = await fetch(OPENAI_TTS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: clean, voice: 'nova' })
+    });
+
+    if (!res.ok) throw new Error('Erro na API de voz');
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
     
     currentAudio = new Audio(url);
     if (onEnd) {
-      currentAudio.onended = () => { onEnd(); };
+      currentAudio.onended = () => {
+        onEnd();
+        URL.revokeObjectURL(url); // limpa memoria
+      };
+    } else {
+      currentAudio.onended = () => URL.revokeObjectURL(url);
     }
     
-    // Toca imediatamente
     currentAudio.play().catch(e => {
       console.warn('Playback impedido pelo navegador:', e);
       if (onEnd) onEnd();
