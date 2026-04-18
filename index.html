@@ -800,6 +800,8 @@ userInput.addEventListener('input', () => {
 // ═══════════════════════════════════════════════════
 // Voice Recognition
 // ═══════════════════════════════════════════════════
+let shouldListen = false;
+
 function setupVoice() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -809,8 +811,8 @@ function setupVoice() {
 
   recognition = new SpeechRecognition();
   recognition.lang = 'pt-BR';
-  recognition.continuous = true;       // Fica ouvindo até o usuário parar
-  recognition.interimResults = true;   // Mostra o texto enquanto fala
+  recognition.continuous = true;
+  recognition.interimResults = true;
 
   recognition.onstart = () => {
     isListening = true;
@@ -831,7 +833,6 @@ function setupVoice() {
         interimText += result[0].transcript;
       }
     }
-    // Mostra no campo em tempo real (final + parcial)
     userInput.value = finalText + interimText;
     userInput.style.height = 'auto';
     userInput.style.height = userInput.scrollHeight + 'px';
@@ -839,17 +840,23 @@ function setupVoice() {
 
   recognition.onend = () => {
     isListening = false;
+    // Auto-restart se o usuário não clicou para parar
+    if (shouldListen) {
+      setTimeout(() => {
+        try { recognition.start(); } catch(e) { /* ignora */ }
+      }, 200);
+      return;
+    }
     document.getElementById('voiceGroup').classList.remove('listening');
     voiceBtn.textContent = '🎤';
     document.getElementById('voiceHint').textContent = 'Ativar o microfone';
     userInput.placeholder = 'Digite a sua resposta...';
-    // NÃO envia automaticamente — o usuário clica no botão de enviar
   };
 
   recognition.onerror = (e) => {
-    console.warn('Erro no microfone:', e.error);
-    // Se for no-speech, apenas reinicia silenciosamente
-    if (e.error === 'no-speech') return;
+    console.warn('Mic erro:', e.error);
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    shouldListen = false;
     isListening = false;
     document.getElementById('voiceGroup').classList.remove('listening');
     voiceBtn.textContent = '🎤';
@@ -859,12 +866,16 @@ function setupVoice() {
 }
 
 voiceBtn.addEventListener('click', (e) => {
-  e.stopPropagation(); // Evita conflito com o voiceGroup
+  e.stopPropagation();
   if (!recognition) return;
-  // Parar TTS se estiver falando
   if (window.speechSynthesis) speechSynthesis.cancel();
-  if (isListening) { recognition.stop(); return; }
-  try { recognition.start(); } catch(err) { console.warn('Mic já ativo:', err); }
+  if (shouldListen) {
+    shouldListen = false;
+    recognition.stop();
+  } else {
+    shouldListen = true;
+    try { recognition.start(); } catch(err) { console.warn('Mic:', err); }
+  }
 });
 
 // ═══════════════════════════════════════════════════
