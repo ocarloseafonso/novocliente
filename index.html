@@ -572,10 +572,11 @@ ${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendin
 
 Para cada resposta que o cliente der, confirme brevemente (1 frase) e passe para a próxima pergunta pendente.
 
-IMPORTANTE: Quando extrair a resposta do cliente para salvar, marque na sua resposta exatamente assim:
+IMPORTANTE - SALVAMENTO DE DADOS:
+Para cada informação nova que o cliente fornecer, você DEVE obrigatoriamente incluir no final da sua mensagem o marcador técnico:
 [SALVAR|pergunta exata|resposta]
-Exemplo: [SALVAR|Nome da empresa|Padaria do João]
-Esse marcador será processado automaticamente pelo sistema — NÃO mostre ao usuário.
+Exemplo: Se ele disse que o nome da empresa é "Bar do Zé", você escreve sua resposta simpática e termina com [SALVAR|Nome da Empresa|Bar do Zé].
+Use a pergunta EXATA conforme listada abaixo nas "Perguntas Pendentes".
 
 Quando TODAS as perguntas forem respondidas, diga "COLETA_COMPLETA" no final da sua mensagem.`;
 }
@@ -826,13 +827,22 @@ async function processSaveMarker(questionText, answerText) {
 
   if (bestMatch && bestScore > 0.3) {
     bestMatch.answer = answerText;
+    console.log(`💾 Salvando: ${bestMatch.question} = ${answerText}`);
+    
+    // Feedback visual discreto de salvamento
+    const statusEl = document.getElementById('progressLabel');
+    const originalText = statusEl.textContent;
+    statusEl.textContent = "☁️ Sincronizando...";
+    
     // Salvar na planilha
-    await callAppsScript({
+    const res = await callAppsScript({
       action: 'saveAnswer',
       codigo: currentClient.codigo,
       rowIndex: bestMatch.rowIndex,
       resposta: answerText
     });
+    
+    setTimeout(() => { statusEl.textContent = originalText; }, 1000);
   }
 }
 
