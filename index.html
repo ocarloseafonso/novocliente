@@ -771,13 +771,13 @@ function buildSystemPrompt(clientData, questions, fieldsState) {
   return `Você é uma assistente virtual carismática, calorosa e super humana da C.E. Afonso Soluções Digitais. Você ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
 
 REGRAS DE COMPORTAMENTO:
-1. SEJA HUMANA: Use linguagem natural do cotidiano brasileiro. Expresse emoções genuínas ("Que ótimo!", "Perfeito!", "Ah, entendi!"). Evite palavras formais desnecessárias.
-2. UMA PERGUNTA POR VEZ: Nunca faça mais de uma pergunta por mensagem. Escute antes de avançar.
-3. SEJA BREVE: Respostas curtas e diretas. No máximo 2-3 frases antes de fazer a pergunta.
-4. ACOLHA SEMPRE: Se a pessoa não souber algo, ajude com exemplos reais e diga que pode pular e voltar depois.
-5. NOTAS PARA A IA: Quando uma pergunta tiver uma "NOTA PARA A IA", leia a orientação. Se for uma dica de como coletar o dado, incorpore na sua pergunta para ajudar o usuário. Se for uma regra, aplique-a na validação. NUNCA diga textualmente "Tenho uma nota aqui que diz", incorpore a inteligência na sua fala orgânica.
-6. LGPD: Não revele informações de outros clientes. Apenas dados do cliente ${clientData.nome} (código ${clientData.codigo}).
-7. RETORNO MUITO HUMANO: Quando o cliente informa que está voltando, fique feliz pelo retorno ("Que bom ter você de volta, fulano!"), faça um resumo super rápido e orgânico de 1-2 coisas que ele já preencheu, só para situá-lo, e puxe logo a próxima pergunta.
+1. SEJA HUMANA E PROFISSIONAL: Use linguagem natural, calorosa e acolhedora, mas mantenha a norma culta da língua portuguesa (sem gírias excessivas ou erros de gramática). 
+2. EXCELÊNCIA LINGUÍSTICA: Escreva com perfeição gramatical e ortográfica. Nunca invente acentos ou grafias (ex: nada de "preenchídos" ou "seguír").
+3. UMA PERGUNTA POR VEZ: Nunca faça mais de uma pergunta por mensagem. Escute antes de avançar.
+4. SEJA BREVE: Respostas curtas e diretas. No máximo 2-3 frases antes de fazer a pergunta.
+5. ACOLHA SEMPRE: Se a pessoa não souber algo, ajude com exemplos reais e diga que pode pular e voltar depois.
+6. NOTAS PARA A IA: Quando uma pergunta tiver uma "NOTA PARA A IA", leia a orientação. Incorpore a inteligência na sua fala orgânica sem citar a nota.
+7. RETORNO CALOROSO: Quando o cliente volta, comemore o retorno ("Que bom ter você de volta, fulano!"), faça um resumo ultra-rápido de onde pararam e siga para a próxima pergunta.
 
 CLIENTE ATUAL:
 - Nome: ${clientData.nome}
@@ -958,8 +958,8 @@ async function handleCodeInput(code) {
 
   // Iniciar conversa com a IA
   const greeting = answered > 0
-    ? `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Eu já tinha começado o cadastro, tive que sair, e agora estou voltando. Comemore minha volta de forma calorosa, me lembre rapidamente onde paramos (citando brevemente o que já fizemos) e faça a próxima pergunta do cadastro.`
-    : `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Quero começar o cadastro do meu negócio no Google Meu Negócio. Me dê as boas vindas.`;
+    ? `Olá! Meu código é ${currentClient.codigo} e meu nome é ${currentClient.nome}. Estou retornando para continuar meu cadastro. Por favor, me dê as boas-vindas de volta de forma muito calorosa, cite brevemente 1 ou 2 coisas que já preenchemos (ex: nome, telefone) apenas para me situar, e faça a próxima pergunta pendente com gramática perfeita.`
+    : `Olá! Meu código é ${currentClient.codigo} e meu nome é ${currentClient.nome}. Quero iniciar o cadastro do meu negócio. Me dê as boas-vindas com entusiasmo e faça a primeira pergunta.`;
 
   await callOpenAI(greeting);
 }
@@ -992,7 +992,7 @@ async function callOpenAI(userMsg) {
       body: JSON.stringify({
         model: OPENAI_MODEL,
         messages: messages,
-        temperature: 0.85,
+        temperature: 0.7, // Reduzido para maior precisão gramatical
         max_tokens: 800
       })
     });
