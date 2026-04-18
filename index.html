@@ -362,6 +362,200 @@
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ═══════════════════════════════════════════════════
+     MOBILE RESPONSIVE — Telas até 640px
+     ═══════════════════════════════════════════════════ */
+  @media (max-width: 640px) {
+    body {
+      padding: 0;
+      min-height: 100dvh; /* Usa dynamic viewport height para lidar com barras de navegador */
+    }
+
+    .app-container {
+      max-width: 100%;
+      height: 100dvh;
+      max-height: none;
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+    }
+
+    /* ── Header compacto ── */
+    header {
+      padding: 16px 16px 10px;
+      gap: 12px;
+    }
+    .logo-image {
+      max-width: 90px;
+      max-height: 32px;
+    }
+    .header-title {
+      font-size: 17px;
+    }
+
+    /* ── Progress compacto ── */
+    .progress-wrap {
+      padding: 6px 16px 0;
+    }
+    .progress-label {
+      font-size: 11px;
+    }
+
+    /* ── Chat com menos padding ── */
+    .chat-wrap {
+      padding: 14px 12px;
+    }
+
+    #chatBox {
+      gap: 14px;
+      min-height: 150px;
+    }
+
+    /* ── Mensagens adaptadas ── */
+    .msg {
+      gap: 8px;
+    }
+    .avatar {
+      width: 30px;
+      height: 30px;
+      font-size: 14px;
+    }
+    .bubble {
+      max-width: 85%;
+      padding: 12px 14px;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    /* ── Input area mobile ── */
+    .input-area {
+      padding: 10px 12px 14px;
+      gap: 8px;
+    }
+
+    /* Esconder o texto "Ativar o microfone", mostrar só o ícone */
+    .voice-text {
+      display: none;
+    }
+    .voice-group {
+      gap: 0;
+    }
+
+    #voiceBtn {
+      width: 42px;
+      height: 42px;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .input-box {
+      padding: 10px 14px;
+      min-width: 0; /* Permite encolher */
+    }
+
+    #userInput {
+      font-size: 16px; /* ≥16px evita zoom automático no iOS */
+    }
+
+    #sendBtn {
+      width: 42px;
+      height: 42px;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    /* ── Modal mobile ── */
+    .overlay {
+      padding: 10px;
+      align-items: flex-end; /* Modal sobe da base no mobile */
+    }
+    .modal {
+      border-radius: 20px 20px 0 0;
+      padding: 20px 16px;
+      max-height: 90vh;
+    }
+    .modal h2 {
+      font-size: 18px;
+    }
+    .modal .sub {
+      font-size: 13px;
+    }
+    .qa-item {
+      padding: 12px;
+    }
+    .qa-a {
+      font-size: 14px;
+    }
+    .modal-actions {
+      flex-direction: column;
+    }
+    .modal-actions .btn {
+      width: 100%;
+      text-align: center;
+      padding: 14px;
+      font-size: 15px;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     EXTRA SMALL — Telas até 380px (iPhone SE, etc.)
+     ═══════════════════════════════════════════════════ */
+  @media (max-width: 380px) {
+    header {
+      padding: 12px 10px 8px;
+      gap: 8px;
+    }
+    .logo-image {
+      max-width: 70px;
+      max-height: 28px;
+    }
+    .header-title {
+      font-size: 15px;
+    }
+    .chat-wrap {
+      padding: 10px 8px;
+    }
+    .input-area {
+      padding: 8px 8px 12px;
+      gap: 6px;
+    }
+    .bubble {
+      max-width: 88%;
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    #voiceBtn {
+      width: 38px;
+      height: 38px;
+      font-size: 16px;
+    }
+    #sendBtn {
+      width: 38px;
+      height: 38px;
+    }
+    .input-box {
+      padding: 9px 12px;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     TECLADO VIRTUAL — Evita layout quebrado quando abre
+     ═══════════════════════════════════════════════════ */
+  @media (max-height: 500px) and (max-width: 640px) {
+    header {
+      padding: 8px 12px 6px;
+    }
+    .progress-wrap {
+      padding: 4px 12px 0;
+    }
+    .logo-image {
+      max-height: 24px;
+    }
+    .header-title {
+      font-size: 14px;
+    }
+  }
 </style>
 </head>
 <body>
