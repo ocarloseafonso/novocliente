@@ -447,6 +447,7 @@ REGRAS DE COMPORTAMENTO:
 3. SEJA BREVE: Respostas curtas e diretas. No máximo 2-3 frases antes de fazer a pergunta.
 4. ACOLHA SEMPRE: Se a pessoa não souber algo, ajude com exemplos reais e diga que pode pular e voltar depois.
 5. LGPD: Não revele informações de outros clientes. Apenas dados do cliente ${clientData.nome} (código ${clientData.codigo}).
+6. RETORNO MUITO HUMANO: Quando o cliente informa que está voltando, fique feliz pelo retorno ("Que bom ter você de volta, fulano!"), faça um resumo super rápido e orgânico de 1-2 coisas que ele já preencheu, só para situá-lo, e puxe logo a próxima pergunta.
 
 CLIENTE ATUAL:
 - Nome: ${clientData.nome}
@@ -617,8 +618,8 @@ async function handleCodeInput(code) {
 
   // Iniciar conversa com a IA
   const greeting = answered > 0
-    ? `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Já respondi algumas perguntas antes. Podemos continuar de onde paramos?`
-    : `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Quero começar o cadastro do meu negócio no Google Meu Negócio.`;
+    ? `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Eu já tinha começado o cadastro, tive que sair, e agora estou voltando. Comemore minha volta de forma calorosa, me lembre rapidamente onde paramos (citando brevemente o que já fizemos) e faça a próxima pergunta do cadastro.`
+    : `Meu código é ${currentClient.codigo}. Meu nome é ${currentClient.nome}. Quero começar o cadastro do meu negócio no Google Meu Negócio. Me dê as boas vindas.`;
 
   await callOpenAI(greeting);
 }
