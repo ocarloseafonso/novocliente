@@ -404,6 +404,7 @@
 // ═══════════════════════════════════════════════════
 // URL do nosso backend seguro na Vercel (a chave fica lá, nunca aqui)
 const OPENAI_API_URL = "/api/chat";
+const OPENAI_TTS_URL = "/api/tts";
 const OPENAI_MODEL = "gpt-4o-mini";
 
 // URL do Apps Script (Banco de Dados Google Sheets)
@@ -424,6 +425,7 @@ let isWaiting = false;
 let recognition = null;
 let isListening = false;
 let ttsEnabled = true;
+let currentAudio = null;
 
 // ═══════════════════════════════════════════════════
 // SYSTEM PROMPT (dinâmico)
@@ -775,7 +777,10 @@ function handleSend() {
   if (!text || isWaiting) return;
 
   // ★ INTERROMPE a voz da assistente na hora que o usuário envia mensagem
-  if (window.speechSynthesis) speechSynthesis.cancel();
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+  }
 
   userInput.value = '';
   userInput.style.height = 'auto';
@@ -874,7 +879,11 @@ function setupVoice() {
 voiceBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   if (!recognition) return;
-  if (window.speechSynthesis) speechSynthesis.cancel();
+  
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+  }
   if (shouldListen) {
     shouldListen = false;
     recognition.stop();
@@ -885,16 +894,8 @@ voiceBtn.addEventListener('click', (e) => {
 });
 
 // ═══════════════════════════════════════════════════
-// Text-to-Speech (TTS) humanizado
+// Text-to-Speech (TTS) com Voz de Cinema (OpenAI)
 // ═══════════════════════════════════════════════════
-let availableVoices = [];
-function loadVoices() {
-  availableVoices = window.speechSynthesis.getVoices();
-}
-if (window.speechSynthesis) {
-  window.speechSynthesis.onvoiceschanged = loadVoices;
-}
-
 function toggleTTS() {
   ttsEnabled = !ttsEnabled;
   const el = document.getElementById('ttsToggle');
@@ -904,46 +905,58 @@ function toggleTTS() {
   } else {
     el.classList.remove('active');
     el.innerHTML = '🔇 Mudo';
-    if (window.speechSynthesis) speechSynthesis.cancel();
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
   }
 }
 
-function speakText(text, onEnd) {
-  if (!ttsEnabled || !window.speechSynthesis) { if (onEnd) onEnd(); return; }
+async function speakText(text, onEnd) {
+  if (!ttsEnabled) { if (onEnd) onEnd(); return; }
 
-  // Limpar formatação
-  const clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '').replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '').substring(0, 500);
-  if (!clean.trim()) { if (onEnd) onEnd(); return; }
-
-  const utterance = new SpeechSynthesisUtterance(clean);
-  utterance.lang = 'pt-BR';
-  utterance.rate = 1.05;
-  utterance.pitch = 1.1;
-  if (onEnd) utterance.onend = onEnd;
-
-  if (availableVoices.length === 0) {
-    availableVoices = window.speechSynthesis.getVoices();
+  // Parar áudio atual se houver
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
   }
 
-  // Priorizar voz feminina PT-BR
-  const ptVoices = availableVoices.filter(v => v.lang.startsWith('pt'));
+  // Limpar a formatação do markdown
+  let clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '');
+  // Remover os comandos técnicos de salvamento
+  clean = clean.replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '');
   
-  // 1a escolha: voz online/neural feminina do Google
-  let bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('francisca'));
-  if (!bestVoice) bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('fem'));
-  if (!bestVoice) bestVoice = ptVoices.find(v =>
-    (v.name.toLowerCase().includes('google') || v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('online')) &&
-    !v.name.toLowerCase().includes('male') && !v.name.toLowerCase().includes('masc')
-  );
-  // 2a escolha: qualquer voz online PT sem indicação de masculino
-  if (!bestVoice) bestVoice = ptVoices.find(v => !v.name.toLowerCase().includes('male') && !v.name.toLowerCase().includes('masc'));
-  // Fallback
-  if (!bestVoice && ptVoices.length > 0) bestVoice = ptVoices[0];
+  clean = clean.trim();
+  if (!clean) { if (onEnd) onEnd(); return; }
 
-  if (bestVoice) utterance.voice = bestVoice;
+  try {
+    const res = await fetch(OPENAI_TTS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: clean, voice: 'nova' })
+    });
 
-  speechSynthesis.cancel();
-  speechSynthesis.speak(utterance);
+    if (!res.ok) throw new Error('Erro na API de voz');
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    
+    currentAudio = new Audio(url);
+    if (onEnd) {
+      currentAudio.onended = () => {
+        onEnd();
+        URL.revokeObjectURL(url); // limpa memoria
+      };
+    } else {
+      currentAudio.onended = () => URL.revokeObjectURL(url);
+    }
+    
+    currentAudio.play();
+
+  } catch (err) {
+    console.error('Erro ao gerar voz:', err);
+    if (onEnd) onEnd();
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -1016,24 +1029,12 @@ async function init() {
   setupVoice();
   setProgress(0, 'Aguardando código...');
 
-  // Aguardar as vozes carregarem antes de falar (garante a voz feminina na 1ª mensagem)
-  const waitForVoices = () => new Promise(resolve => {
-    if (window.speechSynthesis) {
-      availableVoices = window.speechSynthesis.getVoices();
-      if (availableVoices.length > 0) { resolve(); return; }
-      window.speechSynthesis.onvoiceschanged = () => {
-        availableVoices = window.speechSynthesis.getVoices();
-        resolve();
-      };
-      setTimeout(resolve, 1500); // timeout de segurança
-    } else resolve();
-  });
-
-  await waitForVoices();
-
   // Mensagem inicial
   const greeting = 'Olá! Eu sou a assistente virtual da C.E. Afonso.\n\nSou responsável por realizar o seu cadastro aqui na empresa. 😊\n\nFique à vontade para digitar ou usar o microfone para falar comigo!\n\nPara começar, por favor me informe o seu **código de acesso**.';
   appendMessage('bot', greeting);
+  
+  // Com o TTS da OpenAI, não precisamos esperar carregar as vozes locais.
+  // Já podemos falar direto.
   speakText('Olá! Eu sou a assistente virtual da C.E. Afonso. Sou responsável por realizar o seu cadastro aqui na empresa. Fique à vontade para digitar ou usar o microfone para falar comigo. Para começar, por favor me informe o seu código de acesso.');
 
   userInput.focus();
