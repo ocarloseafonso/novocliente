@@ -439,32 +439,44 @@ function buildSystemPrompt(clientData, questions, fieldsState) {
     .map(f => `ID: ${f.rowIndex} | Pergunta: ${f.question}`)
     .join('\n');
 
-  return `Você é "Bê", um assistente simpático e extremamente humano que ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
+  return `Você é "Bê", uma assistente virtual carismática, calorosa e super humana da C.E. Afonso Soluções Digitais. Você ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
 
-REGRAS ESSENCIAIS:
-1. Fale de forma NATURAL e CONVERSACIONAL — como uma pessoa de verdade, nunca um robô. Use expressões coloquiais, reaja genuinamente às respostas.
-2. NUNCA faça mais de UMA pergunta por mensagem. Converse uma de cada vez.
-3. Quando o cliente não souber, ajude com exemplos práticos. Não o pressione.
-4. NUNCA revele informações de OUTROS clientes. Você só tem acesso ao cadastro pertencente ao código ${clientData.codigo} (${clientData.nome}).
-5. De acordo com a LGPD, não forneça informações de terceiros e não compartilhe dados que não pertencem ao cadastro ativo.
-6. Seja breve nas respostas para poupar dados de voz — fale o necessário sem enrolar.
+REGRAS DE COMPORTAMENTO:
+1. SEJA HUMANA: Use linguagem natural do cotidiano brasileiro. Expresse emoções genuínas ("Que ótimo!", "Perfeito!", "Ah, entendi!"). Evite palavras formais desnecessárias.
+2. UMA PERGUNTA POR VEZ: Nunca faça mais de uma pergunta por mensagem. Escute antes de avançar.
+3. SEJA BREVE: Respostas curtas e diretas. No máximo 2-3 frases antes de fazer a pergunta.
+4. ACOLHA SEMPRE: Se a pessoa não souber algo, ajude com exemplos reais e diga que pode pular e voltar depois.
+5. LGPD: Não revele informações de outros clientes. Apenas dados do cliente ${clientData.nome} (código ${clientData.codigo}).
 
 CLIENTE ATUAL:
 - Nome: ${clientData.nome}
 - Código: ${clientData.codigo}
 
-${answeredStr ? `JÁ RESPONDIDAS (não pergunte novamente):\n${answeredStr}\n` : ''}
+${answeredStr ? `JÁ RESPONDIDAS (não pergunte sobre elas novamente):\n${answeredStr}\n` : ''}
 ${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendingStr}\n` : ''}
 
-Para cada resposta que o cliente der, confirme brevemente (1 frase) e passe para a próxima pergunta pendente.
+SISTEMA DE SALVAMENTO:
+Quando o cliente fornecer uma informação:
 
-IMPORTANTE - SALVAMENTO DE DADOS:
-Para cada informação nova que o cliente fornecer, você DEVE obrigatoriamente incluir no final da sua mensagem o marcador técnico com o ID da pergunta:
-[SALVAR|ID|resposta]
-Exemplo: Se a pergunta era "ID: 2 | Nome da empresa" e o cliente disse "Bar do Zé", você escreve sua resposta simpática e termina com:
-[SALVAR|2|Bar do Zé]
+1. PRIMEIRO, avalie se a informação parece válida e coerente:
+   - Nome/sobrenome: deve ter pelo menos 2 palavras
+   - Telefone: deve ter formato de número de telefone
+   - E-mail: deve conter @ e ponto
+   - Cidade/Estado: deve ser um nome de cidade e estado brasileiro reconhecível
+   - Se a resposta não faz sentido para a pergunta (ex: diz "não sei" como nome), sinalize.
 
-Quando TODAS as perguntas forem respondidas, diga "COLETA_COMPLETA" no final da sua mensagem.`;
+2. SE A INFORMAÇÃO PARECER SUSPEITA OU INVÁLIDA, não salve ainda. Diga que achou estranha e pergunte:
+   [CONFIRMAR|ID|resposta_suspeita]
+   Formato da mensagem: "Hmm, isso parece um pouco diferente do que eu esperava para [campo]. Você disse '...'. Quer confirmar dessa forma mesmo ou prefere corrigir?"
+
+3. SE A INFORMAÇÃO PARECER VÁLIDA, salve normalmente:
+   [SALVAR|ID|resposta]
+
+Exemplo prático:
+- Pergunta "ID: 2 | Telefone", cliente disse "bom dia" → use [CONFIRMAR|2|bom dia]
+- Pergunta "ID: 2 | Telefone", cliente disse "11 99999-0000" → use [SALVAR|2|11 99999-0000]
+
+Quando TODAS as perguntas forem respondidas, diga "COLETA_COMPLETA" no final.`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -655,10 +667,19 @@ async function callOpenAI(userMsg) {
     conversationHistory.push({ role: 'assistant', content: reply });
     removeTyping();
 
-    // Processar marcadores de salvamento [SALVAR|pergunta|resposta]
-    const saveMatches = reply.matchAll(/\[SALVAR\|([^|]+)\|([^\]]+)\]/g);
-    for (const match of saveMatches) {
-      await processSaveMarker(match[1].trim(), match[2].trim());
+    // Processar marcadores de salvamento e confirmação
+    const confirmMatches = [...reply.matchAll(/\[CONFIRMAR\|([^|]+)\|([^\]]+)\]/g)];
+    const saveMatches = [...reply.matchAll(/\[SALVAR\|([^|]+)\|([^\]]+)\]/g)];
+    
+    if (confirmMatches.length > 0) {
+      // Modo de confirmação: aguardar usuário confirmar ou corrigir
+      for (const match of confirmMatches) {
+        await processPendingConfirmation(match[1].trim(), match[2].trim());
+      }
+    } else {
+      for (const match of saveMatches) {
+        await processSaveMarker(match[1].trim(), match[2].trim());
+      }
     }
 
     // Verificar se a coleta está completa
@@ -696,6 +717,20 @@ async function callOpenAI(userMsg) {
 }
 
 // ═══════════════════════════════════════════════════
+// SISTEMA DE CONFIRMAÇÃO (dados suspeitos)
+// ═══════════════════════════════════════════════════
+let pendingConfirmation = null; // { id, value }
+
+async function processPendingConfirmation(idStr, answerText) {
+  const targetId = parseInt(idStr, 10);
+  if (isNaN(targetId)) return;
+  const match = clientFields.find(f => f.rowIndex === targetId);
+  if (match) {
+    pendingConfirmation = { id: targetId, value: answerText, field: match };
+  }
+}
+
+// ═══════════════════════════════════════════════════
 // PROCESSAR MARCADORES [SALVAR]
 // ═══════════════════════════════════════════════════
 async function processSaveMarker(idStr, answerText) {
@@ -706,6 +741,7 @@ async function processSaveMarker(idStr, answerText) {
 
   if (match) {
     match.answer = answerText;
+    pendingConfirmation = null; // limpa qualquer confirmação pendente
     console.log(`💾 Salvando ID ${targetId} (${match.question}): ${answerText}`);
     
     // Feedback visual discreto de salvamento
@@ -732,6 +768,9 @@ function handleSend() {
   const text = userInput.value.trim();
   if (!text || isWaiting) return;
 
+  // ★ INTERROMPE a voz da assistente na hora que o usuário envia mensagem
+  if (window.speechSynthesis) speechSynthesis.cancel();
+
   userInput.value = '';
   userInput.style.height = 'auto';
 
@@ -739,7 +778,13 @@ function handleSend() {
     handleCodeInput(text);
   } else {
     appendMessage('user', text);
-    callOpenAI(text);
+    // Se havia uma confirmação pendente, passa o contexto para a IA saber da resposta do usuário
+    if (pendingConfirmation) {
+      const ctx = `O usuário respondeu sobre a confirmação do campo "${pendingConfirmation.field.question}": "${text}"`;
+      callOpenAI(ctx);
+    } else {
+      callOpenAI(text);
+    }
   }
 }
 
@@ -827,24 +872,36 @@ function toggleTTS() {
   }
 }
 
-function speakText(text) {
-  if (!ttsEnabled || !window.speechSynthesis) return;
+function speakText(text, onEnd) {
+  if (!ttsEnabled || !window.speechSynthesis) { if (onEnd) onEnd(); return; }
 
   // Limpar formatação
-  const clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '').replace(/\[SALVAR\|[^\]]*\]/g, '').substring(0, 500);
+  const clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '').replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '').substring(0, 500);
+  if (!clean.trim()) { if (onEnd) onEnd(); return; }
+
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.lang = 'pt-BR';
   utterance.rate = 1.05;
-  utterance.pitch = 1.0;
+  utterance.pitch = 1.1;
+  if (onEnd) utterance.onend = onEnd;
 
   if (availableVoices.length === 0) {
     availableVoices = window.speechSynthesis.getVoices();
   }
 
-  // Procurar melhor voz PT-BR
+  // Priorizar voz feminina PT-BR
   const ptVoices = availableVoices.filter(v => v.lang.startsWith('pt'));
-  let bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('online'));
-  if (!bestVoice) bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('google'));
+  
+  // 1a escolha: voz online/neural feminina do Google
+  let bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('francisca'));
+  if (!bestVoice) bestVoice = ptVoices.find(v => v.name.toLowerCase().includes('fem'));
+  if (!bestVoice) bestVoice = ptVoices.find(v =>
+    (v.name.toLowerCase().includes('google') || v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('online')) &&
+    !v.name.toLowerCase().includes('male') && !v.name.toLowerCase().includes('masc')
+  );
+  // 2a escolha: qualquer voz online PT sem indicação de masculino
+  if (!bestVoice) bestVoice = ptVoices.find(v => !v.name.toLowerCase().includes('male') && !v.name.toLowerCase().includes('masc'));
+  // Fallback
   if (!bestVoice && ptVoices.length > 0) bestVoice = ptVoices[0];
 
   if (bestVoice) utterance.voice = bestVoice;
@@ -921,13 +978,27 @@ async function sendEmail() {
 // ═══════════════════════════════════════════════════
 async function init() {
   setupVoice();
-  if (window.speechSynthesis) loadVoices();
   setProgress(0, 'Aguardando código...');
 
-  // Mensagem inicial (sem IA — é local)
-  const greeting = 'Olá! 👋 Eu sou o **Bê**, seu assistente do Google Meu Negócio.\n\nPara começarmos, por favor, digite ou fale o seu **código de acesso**.\n\nEsse código foi fornecido pelo seu consultor. 🔐';
+  // Aguardar as vozes carregarem antes de falar (garante a voz feminina na 1ª mensagem)
+  const waitForVoices = () => new Promise(resolve => {
+    if (window.speechSynthesis) {
+      availableVoices = window.speechSynthesis.getVoices();
+      if (availableVoices.length > 0) { resolve(); return; }
+      window.speechSynthesis.onvoiceschanged = () => {
+        availableVoices = window.speechSynthesis.getVoices();
+        resolve();
+      };
+      setTimeout(resolve, 1500); // timeout de segurança
+    } else resolve();
+  });
+
+  await waitForVoices();
+
+  // Mensagem inicial da Bê
+  const greeting = 'Olá! Eu sou a **Bê**, assistente virtual da C.E. Afonso.\n\nSou responsável por realizar o seu cadastro no Google Meu Negócio. 😊\n\nFique à vontade para digitar ou usar o microfone para falar comigo!\n\nPara começar, por favor me informe o seu **código de acesso**.';
   appendMessage('bot', greeting);
-  speakText('Olá! Eu sou o Bê, seu assistente do Google Meu Negócio. Para começarmos, por favor, digite ou fale o seu código de acesso.');
+  speakText('Olá! Eu sou a Bê, assistente virtual da C.E. Afonso. Sou responsável por realizar o seu cadastro no Google Meu Negócio. Fique à vontade para digitar ou usar o microfone para falar comigo. Para começar, me informe o seu código de acesso.');
 
   userInput.focus();
 }
