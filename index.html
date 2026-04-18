@@ -573,6 +573,11 @@ async function callAppsScript(params) {
 // ═══════════════════════════════════════════════════
 async function handleCodeInput(code) {
   appendMessage('user', code);
+  
+  // Mensagem imediata enquanto consulta a planilha
+  appendMessage('bot', 'Só um instante, estou verificando o seu código no sistema... 🔎');
+  speakText('Só um instante, estou verificando o seu código no sistema.');
+  
   showTyping();
 
   const result = await callAppsScript({ action: 'checkCode', codigo: code.trim() });
@@ -930,28 +935,21 @@ async function speakText(text, onEnd) {
   if (!clean) { if (onEnd) onEnd(); return; }
 
   try {
-    const res = await fetch(OPENAI_TTS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: clean, voice: 'nova' })
-    });
-
-    if (!res.ok) throw new Error('Erro na API de voz');
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    // Usar requisição GET direta no src do Audio aproveitando o Stream do navegador.
+    // Isso tira os 1-2 segundos de delay do Fetch Blob (carregamento instantâneo).
+    const qs = new URLSearchParams({ input: clean, voice: 'nova' }).toString();
+    const url = `${OPENAI_TTS_URL}?${qs}`;
     
     currentAudio = new Audio(url);
     if (onEnd) {
-      currentAudio.onended = () => {
-        onEnd();
-        URL.revokeObjectURL(url); // limpa memoria
-      };
-    } else {
-      currentAudio.onended = () => URL.revokeObjectURL(url);
+      currentAudio.onended = () => { onEnd(); };
     }
     
-    currentAudio.play();
+    // Toca imediatamente
+    currentAudio.play().catch(e => {
+      console.warn('Playback impedido pelo navegador:', e);
+      if (onEnd) onEnd();
+    });
 
   } catch (err) {
     console.error('Erro ao gerar voz:', err);

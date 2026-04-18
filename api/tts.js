@@ -2,7 +2,7 @@
 // A chave da OpenAI fica aqui no servidor, NUNCA exposta no navegador.
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
+  if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
@@ -12,7 +12,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { input, voice = 'nova', model = 'tts-1' } = req.body;
+    let input = '';
+    let voice = 'nova';
+    let model = 'tts-1';
+
+    if (req.method === 'POST') {
+      input = req.body.input;
+      if (req.body.voice) voice = req.body.voice;
+      if (req.body.model) model = req.body.model;
+    } else {
+      input = req.query.input;
+      if (req.query.voice) voice = req.query.voice;
+      if (req.query.model) model = req.query.model;
+    }
+
+    if (!input) {
+      return res.status(400).json({ error: 'Parâmetro input é obrigatório' });
+    }
 
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
