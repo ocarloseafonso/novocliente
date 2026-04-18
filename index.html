@@ -952,8 +952,8 @@ async function speakText(text, onEnd) {
   let clean = text.replace(/[*_~`#]/g, '').replace(/<[^>]*>?/gm, '');
   // Remover os comandos técnicos de salvamento
   clean = clean.replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '');
-  // Remover emojis que fazem a API de TTS hallucinar outros idiomas
-  clean = clean.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
+  // Filtrar tudo que não for palavra, pontuação básica ou acentos em PT-BR (remove emojis com segurança em todos navegadores)
+  clean = clean.replace(/[^\w\s.,:;!?áéíóúãõâêîôûçÁÉÍÓÚÃÕÂÊÎÔÛÇ-]/gi, '');
   
   clean = clean.trim();
   if (!clean) { if (onEnd) onEnd(); return; }
