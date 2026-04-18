@@ -190,6 +190,35 @@ function getClientData(codigo) {
     return jsonResponse({ tabExists: false, nome: clientName });
   }
 
+  // Carregar aba Formulário para pegar as observações também (para funcionar inclusive com abas de clientes já criadas)
+  const formSheet = ss.getSheetByName('Formulário');
+  let formObsMap = {};
+  if (formSheet) {
+    const formData = formSheet.getDataRange().getValues();
+    const formHeader = formData[0] || [];
+    let obsColIndex = -1;
+    // Tenta encontrar a coluna de observações pelo cabeçalho
+    for(let c=0; c<formHeader.length; c++) {
+      const headerText = String(formHeader[c]).toLowerCase();
+      if(headerText.includes('observaç') || headerText.includes('observac')) {
+        obsColIndex = c;
+        break;
+      }
+    }
+    // Fallback para a coluna C (índice 2) se não achar pelo nome, mas houver mais de 2 colunas
+    if(obsColIndex === -1 && formData[0].length > 2) {
+      obsColIndex = 2;
+    }
+
+    if(obsColIndex !== -1) {
+      for(let i=1; i<formData.length; i++) {
+        const q = String(formData[i][0]).trim();
+        const obs = String(formData[i][obsColIndex]).trim();
+        if(q) formObsMap[q] = obs;
+      }
+    }
+  }
+
   const data = clientSheet.getDataRange().getValues();
   const fields = [];
 
@@ -201,7 +230,8 @@ function getClientData(codigo) {
       fields.push({
         rowIndex: i + 1,
         question: question,
-        answer: answer || ''
+        answer: answer || '',
+        observacao: formObsMap[question] || ''
       });
     }
   }
