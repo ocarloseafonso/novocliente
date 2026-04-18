@@ -1098,13 +1098,28 @@ async function processSaveMarker(idStr, answerText) {
 }
 
 // ═══════════════════════════════════════════════════
+// Desligar microfone (helper centralizado)
+// ═══════════════════════════════════════════════════
+function stopMic() {
+  if (!recognition || !shouldListen) return;
+  shouldListen = false;
+  try { recognition.stop(); } catch(e) { /* já parado */ }
+  // Atualizar UI
+  document.getElementById('voiceGroup').classList.remove('listening');
+  voiceBtn.textContent = '🎤';
+  document.getElementById('voiceHint').textContent = 'Ativar o microfone';
+  userInput.placeholder = 'Digite a sua resposta...';
+}
+
+// ═══════════════════════════════════════════════════
 // Send handler
 // ═══════════════════════════════════════════════════
 function handleSend() {
   const text = userInput.value.trim();
   if (!text || isWaiting) return;
 
-  // ★ INTERROMPE a voz da assistente na hora que o usuário envia mensagem
+  // ★ Desliga mic e voz da assistente ao enviar
+  stopMic();
   stopAudio();
 
   // Limpar acumulador de voz ao enviar
@@ -1126,6 +1141,8 @@ userInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
 });
 userInput.addEventListener('input', () => {
+  // ★ Desliga o mic automaticamente assim que o usuário digitar algo
+  if (userInput.value.length > 0) stopMic();
   userInput.style.height = 'auto';
   userInput.style.height = userInput.scrollHeight + 'px';
 });
@@ -1210,15 +1227,16 @@ function setupVoice() {
 voiceBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   if (!recognition) return;
-  
+
   stopAudio();
   if (shouldListen) {
-    shouldListen = false;
-    voiceAccumulatedText = ''; // Limpar acumulador ao desligar mic
-    recognition.stop();
+    // Clicar de novo → desligar
+    voiceAccumulatedText = '';
+    stopMic();
   } else {
+    // Ligar microfone
     shouldListen = true;
-    voiceAccumulatedText = ''; // Limpar ao iniciar nova sessão de voz
+    voiceAccumulatedText = '';
     try { recognition.start(); } catch(err) { console.warn('Mic:', err); }
   }
 });
