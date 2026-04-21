@@ -72,6 +72,7 @@ function handleRequest(e) {
       case 'getClientData': return getClientData(params.codigo);
       case 'createClientTab': return createClientTab(params.codigo);
       case 'saveAnswer':    return saveAnswer(params.codigo, Number(params.rowIndex), params.resposta);
+      case 'getConfig':     return getConfig();
       default: return jsonResponse({ error: 'Ação desconhecida: ' + action });
     }
   } catch (err) {
@@ -163,15 +164,18 @@ function detectFormularioColumns(formularioSheet) {
 // ★ Conserta abas corrompidas e preserva respostas existentes
 // ═══════════════════════════════════════════════════════════
 function syncQuestionsFromFormulario(clientSheet, formularioSheet) {
-  const { fData, headerRow, qCol } = detectFormularioColumns(formularioSheet);
+  const { fData, headerRow, qCol, obsCol } = detectFormularioColumns(formularioSheet);
 
-  // Extrair perguntas válidas do Formulário
+  // Extrair perguntas e observações válidas do Formulário
   const questions = [];
+  const obsFromForm = [];
   for (let i = headerRow + 1; i < fData.length; i++) {
     const raw = (qCol < fData[i].length) ? fData[i][qCol] : null;
     const q = safeStr(raw).trim();
     if (q && q !== 'undefined') {
       questions.push(q);
+      const obs = (obsCol >= 0 && obsCol < fData[i].length) ? safeStr(fData[i][obsCol]).trim() : '';
+      obsFromForm.push(obs);
     }
   }
 
@@ -188,32 +192,37 @@ function syncQuestionsFromFormulario(clientSheet, formularioSheet) {
     }
   }
 
-  // Escrever cabeçalhos da aba do cliente
+  // Escrever cabeçalhos da aba do cliente (3 colunas)
   clientSheet.getRange(1, 1).setValue('Pergunta')
     .setFontWeight('bold').setBackground('#4f8eff').setFontColor('#ffffff');
-  clientSheet.getRange(1, 2).setValue('Informações')
+  clientSheet.getRange(1, 2).setValue('Respostas')
     .setFontWeight('bold').setBackground('#4f8eff').setFontColor('#ffffff');
+  clientSheet.getRange(1, 3).setValue('Observações')
+    .setFontWeight('bold').setBackground('#f59e0b').setFontColor('#ffffff');
 
-  // Escrever perguntas + preservar respostas que já existiam
+  // Escrever perguntas + preservar respostas + copiar observações do formulário
+  // ★ A coluna C é SEMPRE criada (fica vazia se o Formulário base não tiver obs)
   for (let i = 0; i < questions.length; i++) {
     const row = i + 2;
     clientSheet.getRange(row, 1).setValue(questions[i]);
     clientSheet.getRange(row, 2).setValue(existingAnswers[questions[i]] || '');
+    const obsValue = (obsFromForm[i] !== undefined) ? obsFromForm[i] : '';
+    clientSheet.getRange(row, 3).setValue(obsValue);
   }
 
   // Limpar linhas extras (dados antigos/corrompidos de tentativas anteriores)
   const lastRow = clientSheet.getLastRow();
   const expectedLastRow = questions.length + 1;
   if (lastRow > expectedLastRow) {
-    clientSheet.getRange(expectedLastRow + 1, 1, lastRow - expectedLastRow, 2).clearContent();
+    clientSheet.getRange(expectedLastRow + 1, 1, lastRow - expectedLastRow, 3).clearContent();
   }
 
   return questions.length;
 }
 
 // ═══════════════════════════════════════════════════════════
-// 2. CRIAR (ou REPARAR) ABA DO CLIENTE
-// ★ Agora SEMPRE sincroniza — não importa se a aba já existia
+// 2. CRIAR ABA DO CLIENTE
+// ★ Sincroniza APENAS na criação. Abas existentes são preservadas.
 // ═══════════════════════════════════════════════════════════
 function createClientTab(codigo) {
   const ss = getSs();
@@ -248,13 +257,20 @@ function createClientTab(codigo) {
     isNew = true;
   }
 
-  // ★ SEMPRE sincroniza as perguntas do Formulário → aba do cliente
-  // Isso conserta automaticamente abas que foram criadas com dados errados
-  const totalQ = syncQuestionsFromFormulario(clientSheet, formulario);
-
-  clientSheet.setColumnWidth(1, 450);
-  clientSheet.setColumnWidth(2, 450);
-  clientSheet.setFrozenRows(1);
+  // ★ Sincroniza APENAS se a aba for nova.
+  // Se a aba já existe, respeita o conteúdo manual do usuário.
+  let totalQ = 0;
+  if (isNew) {
+    totalQ = syncQuestionsFromFormulario(clientSheet, formulario);
+    clientSheet.setColumnWidth(1, 450);
+    clientSheet.setColumnWidth(2, 450);
+    clientSheet.setColumnWidth(3, 300);
+    clientSheet.setFrozenRows(1);
+  } else {
+    // Conta as perguntas existentes sem modificar nada
+    const rows = clientSheet.getLastRow();
+    totalQ = rows > 1 ? rows - 1 : 0;
+  }
 
   // Link e status no Painel (só para abas novas)
   if (isNew && pMap.mapping['Nome'] !== undefined) {
@@ -267,6 +283,9 @@ function createClientTab(codigo) {
   if (isNew && pMap.mapping['Status'] !== undefined) {
     painel.getRange(pRow, pMap.mapping['Status'] + 1).setValue('Em andamento');
   }
+
+  // ★ Reordenar abas: Painel, Formulário, Configuração sempre primeiro
+  reorderSheets(ss);
 
   return jsonResponse({ success: true, questionsCount: totalQ });
 }
@@ -297,34 +316,21 @@ function getClientData(codigo) {
 
   if (!clientSheet) return jsonResponse({ tabExists: false });
 
-  // ── Carregar observações da aba Formulário central ──
-  let obsMap = {};
-  if (formSheet) {
-    const { fData, headerRow: fHR, qCol: fQC, obsCol: fOC } = detectFormularioColumns(formSheet);
-
-    if (fQC >= 0 && fOC >= 0) {
-      for (let i = fHR + 1; i < fData.length; i++) {
-        const q   = safeStr(fData[i][fQC]).trim();
-        const obs = safeStr(fData[i][fOC]).trim();
-        if (q && q !== 'undefined') obsMap[q] = obs;
-      }
-    }
-  }
-
-  // ── Carregar perguntas e respostas da aba do cliente ──
-  // Estrutura conhecida: col A = Pergunta, col B = Informações, header na linha 1
+  // ── Carregar perguntas, respostas e observações diretamente da aba do cliente ──
+  // Estrutura: col A = Pergunta, col B = Informações, col C = Observações (editável manualmente)
   const cData = clientSheet.getDataRange().getValues();
   const fields = [];
 
   for (let i = 1; i < cData.length; i++) {
-    const q = safeStr(cData[i][0]).trim();  // Coluna A = pergunta
-    const a = safeStr(cData[i][1]).trim();  // Coluna B = informação
+    const q   = safeStr(cData[i][0]).trim();  // Coluna A = pergunta
+    const a   = safeStr(cData[i][1]).trim();  // Coluna B = resposta
+    const obs = safeStr(cData[i][2]).trim();  // Coluna C = observação (editável manualmente)
     if (q && q !== 'undefined') {
       fields.push({
         rowIndex:   i + 1,   // Linha real na planilha (1-indexed)
         question:   q,
         answer:     a,
-        observacao: obsMap[q] || ''
+        observacao: obs
       });
     }
   }
@@ -372,4 +378,50 @@ function saveAnswer(codigo, rowIndex, resposta) {
   }
 
   return jsonResponse({ success: true, allDone: allDone });
+}
+// ═══════════════════════════════════════════════════════════
+// HELPER: Reordenar abas — Painel, Formulário, Configuração sempre primeiro
+// ═══════════════════════════════════════════════════════════
+function reorderSheets(ss) {
+  const priority = ['Painel', 'Formulário', 'Configuração'];
+  let pos = 0;
+  priority.forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (sheet) {
+      ss.setActiveSheet(sheet);
+      ss.moveActiveSheet(pos + 1);
+      pos++;
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 5. BUSCAR CONFIGURAÇÕES (Prompt do Sistema)
+// ═══════════════════════════════════════════════════════════
+function getConfig() {
+  const ss = getSs();
+  let configSheet = ss.getSheetByName('Configuração');
+  
+  if (!configSheet) {
+    // Criar aba de configuração se não existir
+    configSheet = ss.insertSheet('Configuração');
+    configSheet.getRange(1, 1).setValue('Chave').setFontWeight('bold');
+    configSheet.getRange(1, 2).setValue('Valor').setFontWeight('bold');
+    
+    configSheet.getRange(2, 1).setValue('SystemPrompt');
+    configSheet.getRange(2, 2).setValue('Você é uma assistente virtual carismática e profissional da C.E. Afonso Soluções Digitais. Você ajuda donos de pequenos negócios a preencher o cadastro da empresa.\n\nREGRAS:\n1. Uma pergunta por vez.\n2. Seja breve e cordial.\n3. Use o marcador [SALVAR|ID|resposta] no final.');
+    
+    configSheet.setColumnWidth(1, 150);
+    configSheet.setColumnWidth(2, 600);
+  }
+
+  const data = configSheet.getDataRange().getValues();
+  let config = {};
+  for (let i = 1; i < data.length; i++) {
+    const key = safeStr(data[i][0]).trim();
+    const val = safeStr(data[i][1]).trim();
+    if (key) config[key] = val;
+  }
+
+  return jsonResponse({ success: true, config: config });
 }

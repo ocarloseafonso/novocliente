@@ -719,7 +719,7 @@ const OPENAI_TTS_URL = "/api/tts";
 const OPENAI_MODEL = "gpt-4o-mini";
 
 // URL do Apps Script (Banco de Dados Google Sheets)
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzbCy9cLtG82vmMRlTbWzLdmt2_3Fcbd3iZfbWZjpERHDPBBWfx4PbwjwR7etkmikLN9g/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwHPwrYO9sdrTBLK32BNR32F288O5BM_tv2rpzKtH2l7Mp6Fr2cBivN8WtWCoXuIOLfFw/exec";
 
 const CONSULTANT_EMAIL_DEFAULT = "";
 
@@ -738,6 +738,7 @@ let isListening = false;
 let ttsEnabled = true;
 let currentAudio = null;
 let audioPlayId = 0;
+let systemPromptConfig = ""; // Prompt vindo do Google Sheets
 
 function stopAudio() {
   audioPlayId++;
@@ -768,16 +769,10 @@ function buildSystemPrompt(clientData, questions, fieldsState) {
     })
     .join('\n');
 
-  return `Você é uma assistente virtual carismática, calorosa e super humana da C.E. Afonso Soluções Digitais. Você ajuda donos de pequenos negócios a preencher o cadastro do Google Meu Negócio.
+  // Usa o prompt do Sheets ou um fallback padrão
+  const basePrompt = systemPromptConfig || "Você é uma assistente virtual profissional. Ajude o cliente a preencher o cadastro.";
 
-REGRAS DE COMPORTAMENTO:
-1. SEJA HUMANA E PROFISSIONAL: Use linguagem natural, calorosa e acolhedora, mas mantenha a norma culta da língua portuguesa (sem gírias excessivas ou erros de gramática). 
-2. EXCELÊNCIA LINGUÍSTICA: Escreva com perfeição gramatical e ortográfica. Nunca invente acentos ou grafias (ex: nada de "preenchídos" ou "seguír").
-3. UMA PERGUNTA POR VEZ: Nunca faça mais de uma pergunta por mensagem. Escute antes de avançar.
-4. SEJA BREVE: Respostas curtas e diretas. No máximo 2-3 frases antes de fazer a pergunta.
-5. ACOLHA SEMPRE: Se a pessoa não souber algo, ajude com exemplos reais e diga que pode pular e voltar depois.
-6. NOTAS PARA A IA: Quando uma pergunta tiver uma "NOTA PARA A IA", leia a orientação. Incorpore a inteligência na sua fala orgânica sem citar a nota.
-7. RETORNO CALOROSO: Quando o cliente volta, comemore o retorno ("Que bom ter você de volta, fulano!"), faça um resumo ultra-rápido de onde pararam e siga para a próxima pergunta.
+  return `${basePrompt}
 
 CLIENTE ATUAL:
 - Nome: ${clientData.nome}
@@ -796,19 +791,10 @@ Onde:
 - resposta = exatamente o que o cliente respondeu (transcreva fielmente)
 
 REGRAS CRÍTICAS:
-- NUNCA omita o marcador [SALVAR]. Sempre inclua, sem exceção.
-- Salve MESMO que a resposta pareça estranha, incompleta ou curta.
-- Se o cliente disse "não sei", salve [SALVAR|ID|não sei].
-- Se o cliente disse "não tenho", salve [SALVAR|ID|não tenho].
-- Coloque o marcador no FINAL da mensagem, depois do texto normal.
-- O marcador é invisível para o usuário, mas essencial para o sistema.
-
-Exemplos CORRETOS:
-- "Ótimo! Anotado. Agora me diga..." → [SALVAR|2|Carlos Silva]
-- "Perfeito! Vamos continuar." → [SALVAR|5|11 99999-0000]
-- "Entendido! Não há problema." → [SALVAR|8|não sei]
-
-Quando TODAS as perguntas pendentes tiverem sido respondidas e salvas, diga "COLETA_COMPLETA" no final da mensagem.`;
+- NUNCA omita o marcador [SALVAR].
+- Salve MESMO que a resposta seja curta.
+- Se o cliente não souber, salve [SALVAR|ID|não sei].
+- Quando terminar TUDO, diga "COLETA_COMPLETA" no final.`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -1443,7 +1429,7 @@ async function sendEmail() {
   const email = document.getElementById('consultorEmail').value.trim();
   if (!email) { alert('Por favor, informe o e-mail do consultor.'); return; }
 
-  let report = '📋 RELATÓRIO GMN – NOVO CLIENTE\n';
+  let report = '📋 RELATÓRIO – NOVO CLIENTE\n';
   report += `Cliente: ${currentClient.nome} | Código: ${currentClient.codigo}\n`;
   report += '═'.repeat(40) + '\n\n';
   clientFields.forEach(f => {
@@ -1452,7 +1438,7 @@ async function sendEmail() {
   report += '═'.repeat(40) + '\n';
   report += `Gerado em: ${new Date().toLocaleString('pt-BR')}`;
 
-  const subject = encodeURIComponent(`[GMN] Novo Cliente – ${currentClient.nome}`);
+  const subject = encodeURIComponent(`Novo Cliente – ${currentClient.nome}`);
   const body = encodeURIComponent(report);
   const mailto = `mailto:${email}?subject=${subject}&body=${body}`;
 
@@ -1498,8 +1484,14 @@ async function init() {
   setupVoice();
   setProgress(0, 'Aguardando código...');
 
-  // Pré-carregar áudio da saudação em background (aquece Vercel + baixa áudio antecipadamente)
-  // Quando o usuário clicar em "Começar", o áudio já estará no cache
+  // 1. Buscar configurações do Sheets (Prompt do Sistema)
+  const configRes = await callAppsScript({ action: 'getConfig' });
+  if (configRes.config && configRes.config.SystemPrompt) {
+    systemPromptConfig = configRes.config.SystemPrompt;
+    console.log("✅ Prompt do sistema carregado do Sheets.");
+  }
+
+  // 2. Pré-carregar áudio da saudação
   prefetchGreetingAudio();
 }
 
