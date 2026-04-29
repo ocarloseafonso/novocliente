@@ -740,6 +740,7 @@ let ttsEnabled = true;
 let currentAudio = null;
 let audioPlayId = 0;
 let systemPromptConfig = ""; // Prompt vindo do Google Sheets
+let lastUserMessage = "";     // ★ Guarda o texto ORIGINAL do cliente (para bypass da IA)
 
 function stopAudio() {
   audioPlayId++;
@@ -785,25 +786,19 @@ ${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendin
 SISTEMA DE SALVAMENTO — REGRA ABSOLUTA:
 SEMPRE que o cliente fornecer qualquer resposta para uma pergunta, você OBRIGATORIAMENTE deve incluir o marcador de salvamento no final da sua mensagem.
 
-FORMATO DO MARCADOR (resposta curta, uma linha):
-[SALVAR|ID|resposta aqui]
-
-FORMATO DO MARCADOR (resposta longa ou com múltiplas informações):
-[SALVAR|ID|<<<
-resposta longa aqui
-pode ter várias linhas
->>>]
+FORMATO DO MARCADOR:
+[SALVAR|ID|RESPOSTA_COMPLETA]
 
 Onde:
 - ID = o número que aparece no campo "ID:" da pergunta pendente
-- resposta = exatamente o que o cliente respondeu (transcreva fielmente, SEM resumir, SEM encurtar)
+- RESPOSTA_COMPLETA = sempre escreva exatamente a palavra-chave RESPOSTA_COMPLETA (o sistema vai substituir automaticamente pela resposta integral do cliente)
 
 REGRAS CRÍTICAS:
 - NUNCA omita o marcador [SALVAR].
-- NUNCA resuma ou encurte a resposta do cliente. Transcreva TUDO, palavra por palavra.
-- Salve MESMO que a resposta seja curta.
-- Se a resposta tiver mais de 50 palavras, USE O FORMATO LONGO com <<< e >>>.
-- Se o cliente não souber, salve [SALVAR|ID|não sei].
+- SEMPRE use RESPOSTA_COMPLETA como terceiro campo. NÃO tente transcrever a resposta você mesma.
+- O sistema captura a resposta completa automaticamente.
+- Se o cliente não souber a resposta, salve [SALVAR|ID|não sei].
+- Se o cliente disser que não tem aquela informação, salve [SALVAR|ID|não possuo].
 - Quando terminar TUDO, diga "COLETA_COMPLETA" no final.`;
 }
 
@@ -837,9 +832,8 @@ function appendMessage(role, text) {
 
   const bubble = document.createElement('div');
   bubble.className = `bubble ${role}`;
-  // Clean ALL markers before showing in chat (including long-form <<<...>>>)
+  // Clean ALL markers before showing in chat
   const cleanText = text
-    .replace(/\[SALVAR\s*\|\s*\d+\s*\|\s*<<<[\s\S]*?>>>\s*\]/g, '')
     .replace(/\[SALVAR\|[^\]]*\]/g, '')
     .replace(/\[CONFIRMAR\|[^\]]*\]/g, '')
     .replace(/COLETA_COMPLETA/g, '')
@@ -993,6 +987,9 @@ async function callOpenAI(userMsg) {
   // Formato OpenAI: { role: 'user'|'assistant', content: '...' }
   conversationHistory.push({ role: 'user', content: userMsg });
 
+  // ★ Guardar a mensagem original do cliente (para substituir RESPOSTA_COMPLETA)
+  lastUserMessage = userMsg;
+
   showTyping();
   isWaiting = true;
   sendBtn.disabled = true;
@@ -1032,38 +1029,29 @@ async function callOpenAI(userMsg) {
     removeTyping();
 
     // ── Detectar e processar marcadores [SALVAR] ──
-    // ★ Suporta formato curto: [SALVAR|ID|resposta]
-    //   e formato longo:  [SALVAR|ID|<<<\nresposta longa\n>>>]
-    const longSaveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*<<<([\s\S]*?)>>>\s*\]/g)];
-    const shortSaveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*([^\]]+)\]/g)];
+    // ★ NOVA ARQUITETURA: A IA usa [SALVAR|ID|RESPOSTA_COMPLETA]
+    //   e o frontend substitui RESPOSTA_COMPLETA pelo texto original do cliente
+    const saveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*([^\]]+)\]/g)];
     
-    // Combinar matches, priorizando o formato longo (remove duplicatas por ID)
-    const processedIds = new Set();
-    const allSaveMatches = [];
-    
-    for (const m of longSaveMatches) {
-      const id = m[1].trim();
-      if (!processedIds.has(id)) {
-        processedIds.add(id);
-        allSaveMatches.push({ id: id, answer: m[2].trim() });
-      }
-    }
-    for (const m of shortSaveMatches) {
-      const id = m[1].trim();
-      if (!processedIds.has(id)) {
-        processedIds.add(id);
-        allSaveMatches.push({ id: id, answer: m[2].trim() });
-      }
-    }
-    
-    console.log(`🔍 Resposta da IA (${reply.length} chars). Marcadores [SALVAR] encontrados: ${allSaveMatches.length}`);
-    if (allSaveMatches.length === 0 && isAuthenticated) {
+    console.log(`🔍 Resposta da IA (${reply.length} chars). Marcadores [SALVAR] encontrados: ${saveMatches.length}`);
+    if (saveMatches.length === 0 && isAuthenticated) {
       console.warn("⚠️ ATENÇÃO: Nenhum marcador [SALVAR] encontrado na resposta da IA. Verifique o prompt.");
       console.log("Trecho da resposta:", reply.substring(0, 500));
     }
-    for (const sm of allSaveMatches) {
-      console.log(`💾 Salvando → ID: ${sm.id} | Valor (${sm.answer.length} chars): ${sm.answer.substring(0, 100)}...`);
-      await processSaveMarker(sm.id, sm.answer);
+    for (const match of saveMatches) {
+      const id = match[1].trim();
+      let answer = match[2].trim();
+      
+      // ★ BYPASS DA IA: Quando a IA escreve RESPOSTA_COMPLETA,
+      //   substituímos pelo texto ORIGINAL do cliente (sem resumir)
+      if (answer === 'RESPOSTA_COMPLETA' || answer === 'resposta_completa') {
+        answer = lastUserMessage;
+        console.log(`💾 Salvando → ID: ${id} | BYPASS IA → Usando texto original do cliente (${answer.length} chars)`);
+      } else {
+        console.log(`💾 Salvando → ID: ${id} | Valor da IA: ${answer.substring(0, 100)}...`);
+      }
+      
+      await processSaveMarker(id, answer);
     }
 
     // Verificar se a coleta está completa
@@ -1086,9 +1074,8 @@ async function callOpenAI(userMsg) {
     setProgress(pct, topics[Math.min(topicIdx, topics.length - 1)]);
 
     appendMessage('bot', reply);
-    // Limpar marcadores longos e curtos para o TTS
+    // Limpar marcadores para o TTS
     const ttsReply = reply
-      .replace(/\[SALVAR\s*\|\s*\d+\s*\|\s*<<<[\s\S]*?>>>\s*\]/g, '')
       .replace(/\[SALVAR\|[^\]]*\]/g, '')
       .replace(/\[CONFIRMAR\|[^\]]*\]/g, '')
       .replace(/COLETA_COMPLETA/g, '')
