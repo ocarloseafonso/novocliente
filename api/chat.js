@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { messages, model = 'gpt-4o-mini', temperature = 0.85, max_tokens = 800 } = req.body;
+    const { messages, model = 'gpt-4o-mini', temperature = 0.85, max_tokens = 4096 } = req.body;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

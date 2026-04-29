@@ -783,17 +783,26 @@ ${answeredStr ? `JÁ RESPONDIDAS (não pergunte sobre elas novamente):\n${answer
 ${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendingStr}\n` : ''}
 
 SISTEMA DE SALVAMENTO — REGRA ABSOLUTA:
-SEMPRE que o cliente fornecer qualquer resposta para uma pergunta, você OBRIGATORIAMENTE deve incluir o marcador de salvamento no final da sua mensagem:
+SEMPRE que o cliente fornecer qualquer resposta para uma pergunta, você OBRIGATORIAMENTE deve incluir o marcador de salvamento no final da sua mensagem.
 
-[SALVAR|ID|resposta]
+FORMATO DO MARCADOR (resposta curta, uma linha):
+[SALVAR|ID|resposta aqui]
+
+FORMATO DO MARCADOR (resposta longa ou com múltiplas informações):
+[SALVAR|ID|<<<
+resposta longa aqui
+pode ter várias linhas
+>>>]
 
 Onde:
 - ID = o número que aparece no campo "ID:" da pergunta pendente
-- resposta = exatamente o que o cliente respondeu (transcreva fielmente)
+- resposta = exatamente o que o cliente respondeu (transcreva fielmente, SEM resumir, SEM encurtar)
 
 REGRAS CRÍTICAS:
 - NUNCA omita o marcador [SALVAR].
+- NUNCA resuma ou encurte a resposta do cliente. Transcreva TUDO, palavra por palavra.
 - Salve MESMO que a resposta seja curta.
+- Se a resposta tiver mais de 50 palavras, USE O FORMATO LONGO com <<< e >>>.
 - Se o cliente não souber, salve [SALVAR|ID|não sei].
 - Quando terminar TUDO, diga "COLETA_COMPLETA" no final.`;
 }
@@ -828,8 +837,9 @@ function appendMessage(role, text) {
 
   const bubble = document.createElement('div');
   bubble.className = `bubble ${role}`;
-  // Clean ALL markers before showing in chat
+  // Clean ALL markers before showing in chat (including long-form <<<...>>>)
   const cleanText = text
+    .replace(/\[SALVAR\s*\|\s*\d+\s*\|\s*<<<[\s\S]*?>>>\s*\]/g, '')
     .replace(/\[SALVAR\|[^\]]*\]/g, '')
     .replace(/\[CONFIRMAR\|[^\]]*\]/g, '')
     .replace(/COLETA_COMPLETA/g, '')
@@ -870,17 +880,34 @@ function setProgress(pct, label) {
 }
 
 // ═══════════════════════════════════════════════════
-// APPS SCRIPT CALLS (usa GET para evitar CORS)
+// APPS SCRIPT CALLS
+// ★ Usa POST para ações de escrita (respostas grandes)
+//   e GET para ações de leitura (leves)
 // ═══════════════════════════════════════════════════
 async function callAppsScript(params) {
   try {
     console.log("📡 Chamando Apps Script:", params);
-    const url = new URL(APPS_SCRIPT_URL);
-    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-    const res = await fetch(url.toString(), {
-      method: 'GET',
-      redirect: 'follow'
-    });
+
+    // Ações que enviam dados grandes DEVEM usar POST para não estourar limite de URL
+    const usePost = (params.action === 'saveAnswer');
+
+    let res;
+    if (usePost) {
+      res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(params)
+      });
+    } else {
+      const url = new URL(APPS_SCRIPT_URL);
+      Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+      res = await fetch(url.toString(), {
+        method: 'GET',
+        redirect: 'follow'
+      });
+    }
+
     const text = await res.text();
     const json = JSON.parse(text);
     console.log("📩 Resposta Apps Script:", json);
@@ -988,7 +1015,7 @@ async function callOpenAI(userMsg) {
         model: OPENAI_MODEL,
         messages: messages,
         temperature: 0.7, // Reduzido para maior precisão gramatical
-        max_tokens: 800
+        max_tokens: 4096  // ★ Aumentado para suportar respostas grandes do cliente
       })
     });
 
@@ -1005,15 +1032,38 @@ async function callOpenAI(userMsg) {
     removeTyping();
 
     // ── Detectar e processar marcadores [SALVAR] ──
-    const saveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*([^\]]+)\]/g)];
-    console.log(`🔍 Resposta da IA (${reply.length} chars). Marcadores [SALVAR] encontrados: ${saveMatches.length}`);
-    if (saveMatches.length === 0 && isAuthenticated) {
-      console.warn("⚠️ ATENÇÃO: Nenhum marcador [SALVAR] encontrado na resposta da IA. Verifique o prompt.");
-      console.log("Trecho da resposta:", reply.substring(0, 300));
+    // ★ Suporta formato curto: [SALVAR|ID|resposta]
+    //   e formato longo:  [SALVAR|ID|<<<\nresposta longa\n>>>]
+    const longSaveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*<<<([\s\S]*?)>>>\s*\]/g)];
+    const shortSaveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*([^\]]+)\]/g)];
+    
+    // Combinar matches, priorizando o formato longo (remove duplicatas por ID)
+    const processedIds = new Set();
+    const allSaveMatches = [];
+    
+    for (const m of longSaveMatches) {
+      const id = m[1].trim();
+      if (!processedIds.has(id)) {
+        processedIds.add(id);
+        allSaveMatches.push({ id: id, answer: m[2].trim() });
+      }
     }
-    for (const match of saveMatches) {
-      console.log(`💾 Salvando → ID: ${match[1].trim()} | Valor: ${match[2].trim()}`);
-      await processSaveMarker(match[1].trim(), match[2].trim());
+    for (const m of shortSaveMatches) {
+      const id = m[1].trim();
+      if (!processedIds.has(id)) {
+        processedIds.add(id);
+        allSaveMatches.push({ id: id, answer: m[2].trim() });
+      }
+    }
+    
+    console.log(`🔍 Resposta da IA (${reply.length} chars). Marcadores [SALVAR] encontrados: ${allSaveMatches.length}`);
+    if (allSaveMatches.length === 0 && isAuthenticated) {
+      console.warn("⚠️ ATENÇÃO: Nenhum marcador [SALVAR] encontrado na resposta da IA. Verifique o prompt.");
+      console.log("Trecho da resposta:", reply.substring(0, 500));
+    }
+    for (const sm of allSaveMatches) {
+      console.log(`💾 Salvando → ID: ${sm.id} | Valor (${sm.answer.length} chars): ${sm.answer.substring(0, 100)}...`);
+      await processSaveMarker(sm.id, sm.answer);
     }
 
     // Verificar se a coleta está completa
@@ -1036,7 +1086,14 @@ async function callOpenAI(userMsg) {
     setProgress(pct, topics[Math.min(topicIdx, topics.length - 1)]);
 
     appendMessage('bot', reply);
-    speakText(reply.replace(/\[SALVAR\|[^\]]*\]/g, '').replace(/\[CONFIRMAR\|[^\]]*\]/g, '').replace(/COLETA_COMPLETA/g, '').trim());
+    // Limpar marcadores longos e curtos para o TTS
+    const ttsReply = reply
+      .replace(/\[SALVAR\s*\|\s*\d+\s*\|\s*<<<[\s\S]*?>>>\s*\]/g, '')
+      .replace(/\[SALVAR\|[^\]]*\]/g, '')
+      .replace(/\[CONFIRMAR\|[^\]]*\]/g, '')
+      .replace(/COLETA_COMPLETA/g, '')
+      .trim();
+    speakText(ttsReply);
 
   } catch (err) {
     removeTyping();
