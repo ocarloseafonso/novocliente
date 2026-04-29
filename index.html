@@ -759,7 +759,7 @@ function stopAudio() {
 function buildSystemPrompt(clientData, questions, fieldsState) {
   const answeredStr = fieldsState
     .filter(f => f.answer)
-    .map(f => `- ${f.question}: ${f.answer}`)
+    .map(f => `- ID: ${f.rowIndex} | Pergunta: ${f.question} | Resposta Atual: ${f.answer}`)
     .join('\n');
 
   const pendingStr = fieldsState
@@ -783,23 +783,26 @@ CLIENTE ATUAL:
 ${answeredStr ? `JÁ RESPONDIDAS (não pergunte sobre elas novamente):\n${answeredStr}\n` : ''}
 ${pendingStr ? `PERGUNTAS PENDENTES (faça na ordem, uma de cada vez):\n${pendingStr}\n` : ''}
 
-SISTEMA DE SALVAMENTO — REGRA ABSOLUTA:
-SEMPRE que o cliente fornecer qualquer resposta para uma pergunta, você OBRIGATORIAMENTE deve incluir o marcador de salvamento no final da sua mensagem.
+SISTEMA DE SALVAMENTO — REGRA ABSOLUTA E CRÍTICA:
+Você atua como um entrevistador. Faça UMA pergunta por vez.
+ASSIM QUE o cliente responder a pergunta anterior, você OBRIGATORIAMENTE deve salvar a resposta usando o marcador [SALVAR] no final da sua mensagem.
 
 FORMATO DO MARCADOR:
-[SALVAR|ID|RESPOSTA_COMPLETA]
+[SALVAR|ID_DA_PERGUNTA_RESPONDIDA|CAPTURA_DIRETA]
 
-Onde:
-- ID = o número que aparece no campo "ID:" da pergunta pendente
-- RESPOSTA_COMPLETA = sempre escreva exatamente a palavra-chave RESPOSTA_COMPLETA (o sistema vai substituir automaticamente pela resposta integral do cliente)
+EXEMPLO DE FLUXO CORRETO (Siga este padrão rigorosamente):
+(Imagine que a pergunta "Qual é o seu site?" seja o ID 2, e "Concorrentes?" seja o ID 3)
+Assistente: "Qual é o seu site?" (NÃO usa marcador, pois acabou de perguntar)
+Cliente: "www.meusite.com.br"
+Assistente: "Perfeito! E quais são os seus concorrentes? [SALVAR|2|CAPTURA_DIRETA]" (O marcador salva a resposta "www.meusite.com.br" no ID 2. Não salva no ID 3!)
 
-REGRAS CRÍTICAS:
-- NUNCA omita o marcador [SALVAR].
-- SEMPRE use RESPOSTA_COMPLETA como terceiro campo. NÃO tente transcrever a resposta você mesma.
-- O sistema captura a resposta completa automaticamente.
-- Se o cliente não souber a resposta, salve [SALVAR|ID|não sei].
-- Se o cliente disser que não tem aquela informação, salve [SALVAR|ID|não possuo].
-- Quando terminar TUDO, diga "COLETA_COMPLETA" no final.`;
+REGRAS CRÍTICAS PARA O MARCADOR:
+1. ID CORRETO: NUNCA use o ID da pergunta que você está fazendo agora. Use sempre o ID da pergunta que o cliente ACABOU DE RESPONDER.
+2. CAPTURA_DIRETA: O terceiro campo deve ser SEMPRE a palavra EXATA "CAPTURA_DIRETA". Não transcreva a resposta. O sistema usará essa palavra-chave para capturar o texto exato do cliente (mesmo que seja enorme) sem perder nada.
+3. NUNCA coloque a sua própria pergunta dentro do marcador.
+4. Na sua PRIMEIRA mensagem (de boas-vindas), NÃO use o marcador [SALVAR], pois o cliente ainda não respondeu nenhuma pergunta.
+5. Se o cliente não souber a resposta, salve: [SALVAR|ID|Não sabe]
+6. Quando todas as perguntas estiverem respondidas, diga APENAS "COLETA_COMPLETA".`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -1042,9 +1045,10 @@ async function callOpenAI(userMsg) {
       const id = match[1].trim();
       let answer = match[2].trim();
       
-      // ★ BYPASS DA IA: Quando a IA escreve RESPOSTA_COMPLETA,
+      // ★ BYPASS DA IA: Quando a IA escreve CAPTURA_DIRETA ou RESPOSTA_COMPLETA,
       //   substituímos pelo texto ORIGINAL do cliente (sem resumir)
-      if (answer === 'RESPOSTA_COMPLETA' || answer === 'resposta_completa') {
+      const keyword = answer.toUpperCase();
+      if (keyword === 'CAPTURA_DIRETA' || keyword === 'RESPOSTA_COMPLETA') {
         answer = lastUserMessage;
         console.log(`💾 Salvando → ID: ${id} | BYPASS IA → Usando texto original do cliente (${answer.length} chars)`);
       } else {
