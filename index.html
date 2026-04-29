@@ -837,8 +837,8 @@ function appendMessage(role, text) {
   bubble.className = `bubble ${role}`;
   // Clean ALL markers before showing in chat
   const cleanText = text
-    .replace(/\[SALVAR\|[^\]]*\]/g, '')
-    .replace(/\[CONFIRMAR\|[^\]]*\]/g, '')
+    .replace(/\[SALVAR\s*\|\s*[^\]]*\]/g, '')
+    .replace(/\[CONFIRMAR\s*\|\s*[^\]]*\]/g, '')
     .replace(/COLETA_COMPLETA/g, '')
     .trim();
   bubble.innerHTML = cleanText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
@@ -1032,9 +1032,8 @@ async function callOpenAI(userMsg) {
     removeTyping();
 
     // ── Detectar e processar marcadores [SALVAR] ──
-    // ★ NOVA ARQUITETURA: A IA usa [SALVAR|ID|RESPOSTA_COMPLETA]
-    //   e o frontend substitui RESPOSTA_COMPLETA pelo texto original do cliente
-    const saveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)\s*\|\s*([^\]]+)\]/g)];
+    // ★ O terceiro parâmetro pode ou não estar presente dependendo da IA
+    const saveMatches = [...reply.matchAll(/\[SALVAR\s*\|\s*(\d+)(?:\s*\|\s*([^\]]+))?\s*\]/g)];
     
     console.log(`🔍 Resposta da IA (${reply.length} chars). Marcadores [SALVAR] encontrados: ${saveMatches.length}`);
     if (saveMatches.length === 0 && isAuthenticated) {
@@ -1043,7 +1042,7 @@ async function callOpenAI(userMsg) {
     }
     for (const match of saveMatches) {
       const id = match[1].trim();
-      let answer = match[2].trim();
+      let answer = match[2] ? match[2].trim() : 'CAPTURA_DIRETA'; // Assume CAPTURA_DIRETA como default se a IA omitir
       
       // ★ BYPASS DA IA: Quando a IA escreve CAPTURA_DIRETA ou RESPOSTA_COMPLETA,
       //   substituímos pelo texto ORIGINAL do cliente (sem resumir)
@@ -1080,8 +1079,8 @@ async function callOpenAI(userMsg) {
     appendMessage('bot', reply);
     // Limpar marcadores para o TTS
     const ttsReply = reply
-      .replace(/\[SALVAR\|[^\]]*\]/g, '')
-      .replace(/\[CONFIRMAR\|[^\]]*\]/g, '')
+      .replace(/\[SALVAR\s*\|\s*[^\]]*\]/g, '')
+      .replace(/\[CONFIRMAR\s*\|\s*[^\]]*\]/g, '')
       .replace(/COLETA_COMPLETA/g, '')
       .trim();
     speakText(ttsReply);
